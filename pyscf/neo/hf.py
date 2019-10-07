@@ -15,6 +15,7 @@ class HF(SCF):
     'Hartree Fock for NEO'
     def __init__(self, mol):
         SCF.__init__(self, mol)
+        self.direct = True #direct diagonalization for proton 
 
     def get_hcore_nuc(self):
         'get core Hamiltonian for quantum nuclei'
@@ -22,7 +23,7 @@ class HF(SCF):
         #M = gto.mole.atom_mass_list(mol)*1836 # Note: proton mass
         mol = self.mol
         mol.mole_nuc()
-        h = gto.moleintor.getints('int1e_kin_sph', mol.nuc._atm, mol.nuc._bas, mol.nuc._env, hermi=1, aosym='s4')/1836.1527
+        h = gto.moleintor.getints('int1e_kin_sph', mol.nuc._atm, mol.nuc._bas, mol.nuc._env, hermi=1, aosym='s4')/1836.15267343
         h -= gto.moleintor.getints('int1e_nuc_sph', mol.nuc._atm, mol.nuc._bas, mol.nuc._env, hermi=1, aosym='s4')
 
         return h
@@ -45,30 +46,25 @@ class HF(SCF):
     def get_veff_elec(self, dm_elec, dm_nuc):
         'get the HF effective potential for electrons in NEO'
         mol = self.mol
-        #vj, vk = scf.hf.get_jk(mol.elec, dm_elec)
         vj, vk = scf.jk.get_jk(mol.elec, (dm_elec,dm_elec), ('ijkl,ji->kl','ijkl,jk->il'), aosym='s8')
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym ='s4')
-        
-        return vj - vk * .5 - jcross 
+
+        return vj - vk * .5 - jcross
 
     def get_veff_nuc(self, dm_elec, dm_nuc):
         'get the HF effective potential for quantum nuclei in NEO'
         mol = self.mol
-        #vj , vk = scf.hf.get_jk(mol.nuc, dm_nuc)
         vj, vk = scf.jk.get_jk(mol.nuc, (dm_nuc,dm_nuc), ('ijkl,ji->kl','ijkl,jk->il'), aosym='s8')
-        #inte2 = gto.moleintor.getints('int2e_sph',mol.nuc._atm, mol.nuc._bas, mol.nuc._env, aosym='s8').reshape((mol.nuc.nao_nr(),)*4)
-        #vj = numpy.einsum('ijkl,ji->kl', inte2, dm_nuc)
-        #vk = numpy.einsum('ijkl,jk->il', inte2, dm_nuc)
-
         jcross = scf.jk.get_jk((mol.nuc, mol.nuc, mol.elec, mol.elec), dm_elec, scripts='ijkl,lk->ij', aosym = 's4')
-        #print numpy.linalg.norm(vj),numpy.linalg.norm(vk)
-        return vj - vk - jcross
-        #return -jcross
+
+        if mol.nuc_num == 1 and self.direct == True:
+            return -jcross
+        else:
+            return vj - vk - jcross
 
     def elec_nuc_coulomb(self, dm_elec, dm_nuc):
         'get the Coulomb energy between electrons and quantum nuclei'
         mol = self.mol
-        #jcross = scf.jk.get_jk((mol.nuc, mol.nuc, mol.elec, mol.elec), dm_elec, scripts='ijkl,lk->ij', aosym = 's4')
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         ecoul = numpy.einsum('ij,ij', jcross, dm_elec)
         #return jcross
@@ -83,27 +79,24 @@ class HF(SCF):
         h1e = scf.hf.get_hcore(mol.elec)
         E1_elec = numpy.einsum('ij,ji', h1e, dm_elec)
         vhf_elec = self.get_veff_elec(dm_elec, dm_nuc)
-        #vhf_elec = scf.hf.get_veff(mol.elec, dm_elec)
         E_coul_elec = numpy.einsum('ij,ji', vhf_elec, dm_elec) * 0.5
 
         h1n = self.get_hcore_nuc()
-        E1_nuc = numpy.einsum('ij,ji', self.get_hcore_nuc(), dm_nuc)
+        E1_nuc = numpy.einsum('ij,ji', h1n, dm_nuc)
         vhf_nuc = self.get_veff_nuc(dm_elec, dm_nuc)
-        #vhf_nuc = scf.hf.get_veff(mol.nuc, dm_nuc)
         E_coul_nuc = numpy.einsum('ij,ji', vhf_nuc, dm_nuc)* 0.5
 
-        print energy_classical_nuc, E1_elec, E_coul_elec, E1_nuc, E_coul_nuc
+        #print energy_classical_nuc, E1_elec, E_coul_elec, E1_nuc, E_coul_nuc
 
         E_tot = energy_classical_nuc  + E1_elec + E_coul_elec  + E1_nuc + E_coul_nuc 
-        
         return E_tot
 
-
-    def scf(self, conv_tot = 1e-10):
+    
+    def scf(self, conv_tot = 1e-7):
         'self-consistent field'
         mol = self.mol
 
-        dm_elec = scf.hf.init_guess_by_1e(mol.elec)
+        dm_elec = scf.hf.init_guess_by_atom(mol.elec)
         dm_nuc = self.init_guess_by_core_hamiltonian()
 
         h1e = scf.hf.get_hcore(mol.elec)
@@ -156,8 +149,6 @@ class HF(SCF):
 
             if abs(E_tot - E_last) < conv_tot:
                 scf_conv = True
-
-            if scf_conv:
                 print scf_conv
                 print E_last
                 print eo_occ
