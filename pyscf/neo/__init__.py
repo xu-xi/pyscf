@@ -2,3 +2,4 @@
 
 from pyscf.neo.mole import *
 from pyscf.neo.hf import *
+from pyscf.neo.rks import *

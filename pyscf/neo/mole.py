@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import sys
 import math
 import numpy 
 from pyscf import gto
@@ -14,8 +15,14 @@ class Mole(gto.mole.Mole):
         if alist is not None:
             self.nuc_num = len(alist)
             for i in alist:
-                self.quantum_nuc[i] = True
+                if self.atom_pure_symbol(i) == 'H':
+                    self.quantum_nuc[i] = True
+                else:
+                    print 'ERROR: only support quantum H now';sys.exit(1)
+
         #logging.info
+        self.mole_elec()
+        self.mole_nuc()
 
     def mole_elec(self):
         'return an Mole object for NEO-electron'
