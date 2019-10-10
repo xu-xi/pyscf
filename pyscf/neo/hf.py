@@ -56,21 +56,12 @@ class HF(SCF):
         nuc_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
 
         return scf.hf.make_rdm1(nuc_coeff, nuc_occ)
+    
+    def get_hcore_elec(self, mol=None):
+        'get the matrix of core Hamiltonian of electrons of NEO'
 
-    def get_veff(self, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
-        'get the HF effective potential for electrons in NEO (rewrite the get_veff method of the SCF class). Be carefule with the effects of :attr:`SCF.direct_scf` on this function'
-        #mol = self.mol
-
-        vjk = scf.hf.get_veff(mol, dm, dm_last, vhf_last, hermi)
-
-        #if self.dm_nuc is not None:
-        #    jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), self.dm_nuc, scripts='ijkl,lk->ij', aosym ='s4')
-            #print numpy.einsum('ij,ij',jcross,dm)
-        #else:
-        #    jcross = 0
-
-        return vjk - self.elec_nuc_coulomb(dm, self.dm_nuc)
-
+        jcross = scf.jk.get_jk((mol, mol, self.mol.nuc, self.mol.nuc), self.dm_nuc, scripts='ijkl,lk->ij', aosym ='s4')
+        return scf.hf.get_hcore(mol) - jcross
 
     def get_veff_elec(self, dm_elec, dm_nuc):
         'get the HF effective potential for electrons in NEO for given density matrixes of electrons and quantum nuclei'
@@ -88,7 +79,7 @@ class HF(SCF):
         jcross = scf.jk.get_jk((mol.nuc, mol.nuc, mol.elec, mol.elec), dm_elec, scripts='ijkl,lk->ij', aosym = 's4')
 
         if mol.nuc_num == 1 and self.direct == True:
-            return -jcross
+            return - jcross
         else:
             return vj - vk - jcross #still problematic for convergence
 
@@ -98,6 +89,20 @@ class HF(SCF):
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         return jcross
         #return numpy.einsum('ij,ij', jcross, dm_elec)
+
+    def energy_tot2(self, mf_elec, dm_nuc):
+        'Total energy of NEO'
+        mol = self.mol
+
+        h1n = self.get_hcore_nuc()
+        E1_nuc = numpy.einsum('ij,ji', h1n, dm_nuc)
+        #vhf_nuc = self.get_veff_nuc(dm_elec, dm_nuc)
+        vhf_nuc = scf.hf.get_veff(mol.nuc, dm_nuc)
+        E_coul_nuc = numpy.einsum('ij,ji', vhf_nuc, dm_nuc)* 0.5
+
+        E_tot = mf_elec.e_tot + E1_nuc 
+        return E_tot
+
 
     def energy_tot(self, dm_elec, dm_nuc):
         'Total HF energy of NEO'
@@ -121,23 +126,16 @@ class HF(SCF):
         return E_tot
 
     def scf_test(self, conv_tot = 1e-7):
+        max_cycle = 100
         mol = self.mol
 
-        self.dm_elec = scf.hf.init_guess_by_atom(mol.elec)
         self.dm_nuc = self.init_guess_by_core_hamiltonian()
 
         mf_elec = scf.RHF(mol.elec)
         mf_elec.init_guess = 'atom'
-        mf_elec.get_veff = self.get_veff
-
-
-        #h1n = self.get_hcore_nuc()
-        #s1n = scf.hf.get_ovlp(mol.nuc)
-        #self.max_cycle = 100
-
+        mf_elec.get_hcore = self.get_hcore_elec
         mf_elec.kernel()
-
-        #self.dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+        self.dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
 
         h1n = self.get_hcore_nuc()
         s1n = scf.hf.get_ovlp(mol.nuc)
@@ -148,11 +146,33 @@ class HF(SCF):
         no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei 
         self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
 
-        #mf_elec.kernel()
-
+        E_tot = self.energy_tot2(mf_elec, self.dm_nuc) 
+        print 'Initial energy:', E_tot
         scf_conv = False
         cycle = 0
 
+        while not scf_conv and cycle <= max_cycle:
+            cycle += 1
+            E_last = E_tot
+            
+            mf_elec.kernel()
+            self.dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+
+            vhf_nuc = self.get_veff_nuc(self.dm_elec, self.dm_nuc)
+
+            fock_nuc = h1n + vhf_nuc
+            no_energy, no_coeff = scf.hf.eig(fock_nuc, s1n)
+            no_occ = numpy.zeros(len(no_energy))
+            no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei 
+            self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
+
+            E_tot = self.energy_tot2(mf_elec, self.dm_nuc)
+            print 'Cycle',cycle
+            print E_tot
+
+            if abs(E_tot - E_last) < conv_tot:
+                scf_conv = True
+                print 'Converged'
 
     def scf(self, conv_tot = 1e-7):
         'self-consistent field'

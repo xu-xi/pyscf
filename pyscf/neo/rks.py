@@ -23,12 +23,6 @@ class KS(HF):
         HF.__init__(self, mol)
         self.xc = 'HF'
 
-    def get_veff_elec(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
-        'get the DFT effective potential for electrons in NEO'
-        vjk = dft.rks.get_veff(ks, mol, dm, dm_last, vhf_last, hermi)
-
-        return vjk - self.elec_nuc_coulomb(dm, self.dm_nuc)
-        
     def energy_tot(self, ks, dm_elec, dm_nuc):
         'total energy'
         mol = self.mol
@@ -50,7 +44,54 @@ class KS(HF):
         print energy_classical_nuc, E1_elec, E_coul_elec, E1_nuc, E_coul_nuc
 
         return energy_classical_nuc + E1_elec + E_coul_elec + E1_nuc + E_coul_nuc #double count now
-        
+    def scf_test(self, conv_tot = 1e-7):
+        mol = self.mol
+        max_cycle = 100
+        self.dm_nuc = self.init_guess_by_core_hamiltonian()
+
+        mf_elec = dft.RKS(mol.elec)
+        mf_elec.xc = self.xc
+        mf_elec.init_guess = 'atom'
+        mf_elec.get_hcore = self.get_hcore_elec
+        mf_elec.kernel()
+        self.dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+
+        h1n = self.get_hcore_nuc()
+        s1n = scf.hf.get_ovlp(mol.nuc)
+        vhf_nuc = self.get_veff_nuc(self.dm_elec, self.dm_nuc)
+        fock_nuc = h1n + vhf_nuc
+        no_energy, no_coeff = scf.hf.eig(fock_nuc, s1n)
+        no_occ = numpy.zeros(len(no_energy))
+        no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
+        self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
+
+        E_tot = self.energy_tot2(mf_elec, self.dm_nuc)
+        print 'Initial energy:', E_tot
+        scf_conv = False
+        cycle = 0
+
+        while not scf_conv and cycle <= max_cycle:
+            cycle += 1
+            E_last = E_tot
+
+            mf_elec.kernel()
+            self.dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+
+            vhf_nuc = self.get_veff_nuc(self.dm_elec, self.dm_nuc)
+
+            fock_nuc = h1n + vhf_nuc
+            no_energy, no_coeff = scf.hf.eig(fock_nuc, s1n)
+            no_occ = numpy.zeros(len(no_energy))
+            no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
+            self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
+
+            E_tot = self.energy_tot2(mf_elec, self.dm_nuc)
+            print 'Cycle',cycle
+            print E_tot
+
+            if abs(E_tot - E_last) < conv_tot:
+                scf_conv = True
+                print 'Converged'
 
     def scf(self, conv_tot = 1e-7):
         mol = self.mol
