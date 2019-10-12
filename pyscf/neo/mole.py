@@ -32,7 +32,7 @@ class Mole(gto.mole.Mole):
             if self.elec.quantum_nuc[i] == True:
                 self.elec._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
-        self.elec.charge = -int(self.nuc_num)
+        self.elec.charge -= int(self.nuc_num) 
         return self.elec
 
 
@@ -49,7 +49,7 @@ class Mole(gto.mole.Mole):
             if self.quantum_nuc[i] == True:
                 self.nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
-        #self.nuc.charge = int(self.nuc_num)
+        #self.nuc.charge += int(self.nuc_num)
         return self.nuc
 
 
