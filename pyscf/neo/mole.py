@@ -21,8 +21,13 @@ class Mole(gto.mole.Mole):
                     print 'ERROR: only support quantum H now';sys.exit(1)
 
         #logging.info
+        self.nuclei_expect_position = [0.0, 0.0, 0.0] 
         self.mole_elec()
         self.mole_nuc()
+
+    def set_nuclei_expect_position(self, position):
+        'set an expectation value of the position operator for quantum nuclei(only support single proton now)'           
+        self.nuclei_expect_position = numpy.array(position)
 
     def mole_elec(self):
         'return an Mole object for NEO-electron'

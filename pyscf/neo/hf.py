@@ -127,6 +127,7 @@ class HF(SCF):
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         E_cross = numpy.einsum('ij,ij', jcross, dm_elec)
 
+        print numpy.einsum('ij,ji', mf_nuc.get_hcore(), dm_nuc)
         E_tot = mf_elec.e_tot + mf_nuc.e_tot - mf_nuc.energy_nuc() + E_cross 
 
         return E_tot
@@ -158,5 +159,6 @@ class HF(SCF):
             if abs(E_tot - E_last) < conv_tot:
                 scf_conv = True
                 print 'Converged!'
+                print numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
 
 
