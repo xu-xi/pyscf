@@ -53,8 +53,6 @@ class HF(SCF):
         h = mol.intor_symmetric('int1e_kin')/mass_proton
         h -= mol.intor_symmetric('int1e_nuc')
         if self.dm_elec is not None:
-            #with mol.with_rinv_origin(mol.atom_coord(2)):
-            #print mol._env
             h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')
         return h
 

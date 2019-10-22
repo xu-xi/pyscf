@@ -55,14 +55,12 @@ class Mole(gto.mole.Mole):
         self.nuc._basis = gto.mole.format_basis({'H': self.nuc_basis}) #only support hydrogen now
         #self.nuc.basis = {'H': self.nuc_basis, 'C':'sto-3g'}
         #print self.nuc.basis
-        self.nuc._atm, self.nuc._bas, self.nuc._env = gto.mole.make_env(self.nuc._atom,self.nuc._basis)
+        self.nuc._atm, self.nuc._bas, self.nuc._env = gto.mole.make_env(self.nuc._atom,self.nuc._basis, self._env[:gto.PTR_ENV_START])
         for i in range(self.natm):
             if self.quantum_nuc[i] == True:
                 self.nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
-        self.nuc.symmetry = 'coov'
 
-        #self.nuc.set_rinv_orig_(self.nuc.atom_coord(0)) #test
-        #self.nuc.set_common_origin(self.nuc.atom_coord(0)) #test
+        self.nuc._built = True
         #self.nuc.charge += int(self.nuc_num)
         return self.nuc
 
