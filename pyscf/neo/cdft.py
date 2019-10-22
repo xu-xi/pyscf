@@ -13,7 +13,7 @@ class CDFT(KS):
     def __init__(self, mol):
         KS.__init__(self, mol)
 
-        self.f = numpy.array([0.0,0.0,0.0],dtype='float64')
+        self.f = numpy.zeros(3) 
         self.mf_nuc = scf.RHF(mol.nuc)
         self.mf_nuc.get_init_guess = self.get_init_guess_nuc
         self.mf_nuc.get_hcore = self.get_hcore_nuc
@@ -33,8 +33,7 @@ class CDFT(KS):
         if self.dm_elec is not None:
             h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')
 
-        if mol.nuclei_expect_position is not None:
-            h += numpy.einsum('xij,x->ij', mol.intor_symmetric('int1e_r', comp=3), self.f)
+        h += numpy.einsum('xij,x->ij', mol.intor_symmetric('int1e_r', comp=3), self.f)
 
         return h
 
@@ -50,7 +49,7 @@ class CDFT(KS):
 
     def newton_opt(self, mf_nuc):
 
-        max_cycle = 10
+        max_cycle = 50
         mol = self.mol
 
         fock = self.get_hcore_nuc(mol.nuc)
@@ -59,12 +58,12 @@ class CDFT(KS):
         first_order = numpy.einsum('i,xij,j->x', no_coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), no_coeff[:,0]) - mol.nuclei_expect_position 
         cycle =0
 
-        while not numpy.linalg.norm(first_order) < 1e-5 and cycle < max_cycle:
+        while not numpy.linalg.norm(first_order) < 1e-9 and cycle < max_cycle:
             #print 'first order:', first_order
             cycle += 1
             second_order = self.L_second_order(no_energy, no_coeff)
             #print 'Condition number of 2nd de:', numpy.linalg.cond(second_order)
-            self.f -= numpy.dot(numpy.linalg.pinv(second_order), first_order)
+            self.f -= numpy.dot(numpy.linalg.inv(second_order), first_order)
             fock = self.get_hcore_nuc(self.mol.nuc)
             no_energy, no_coeff = self.mf_nuc.eig(fock, s1n)
             first_order = numpy.einsum('i,xij,j->x', no_coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), no_coeff[:,0]) - mol.nuclei_expect_position 
@@ -74,11 +73,11 @@ class CDFT(KS):
         print 'f:', self.f
         return self.f
 
-    def scf_cdft_nuc(self, conv_tot=1e-7):
-        'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
+    def scf(self, conv_tot=1e-7):
+        'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
         max_cycle = 100
         mol = self.mol
-        self.mf_elec.kernel() #should delete
+        self.mf_elec.kernel()
         self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
         self.f = self.newton_opt(self.mf_nuc)
@@ -90,7 +89,8 @@ class CDFT(KS):
         self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
 
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), self.dm_nuc, scripts='i    jkl,lk->ij', aosym = 's4')
-        E_tot = self.mf_elec.e_tot + numpy.einsum('ij,ji', h1n, self.dm_nuc) + numpy.einsum('ij,ij', jcross, self.dm_elec)
+        hr = numpy.einsum('xij,x->ij', mol.nuc.intor_symmetric('int1e_r', comp=3), self.f)
+        E_tot = self.mf_elec.e_tot + numpy.einsum('ij,ji', h1n, self.dm_nuc) + numpy.einsum('ij,ij', jcross, self.dm_elec) - numpy.einsum('ij,ji', hr, self.dm_nuc)
 
         print 'Initial energy:', E_tot
         scf_conv = False
@@ -112,7 +112,8 @@ class CDFT(KS):
             self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
             jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), self.dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
 
-            E_tot = self.mf_elec.e_tot + numpy.einsum('ij,ji', h1n, self.dm_nuc) + numpy.einsum('ij,ij', jcross, self.dm_elec)
+            hr = numpy.einsum('xij,x->ij', mol.nuc.intor_symmetric('int1e_r', comp=3), self.f)
+            E_tot = self.mf_elec.e_tot + numpy.einsum('ij,ji', h1n, self.dm_nuc) + numpy.einsum('ij,ij', jcross, self.dm_elec)  - numpy.einsum('ij,ji', hr, self.dm_nuc)
 
             print 'Cycle',cycle
             print E_tot
@@ -120,21 +121,6 @@ class CDFT(KS):
             if abs(E_tot - E_last) < conv_tot:
                 scf_conv = True
                 print 'Converged'
+                print numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
                 return E_tot
 
-
-    def scf(self, conv_tot=1e-7):
-        max_cycle = 10
-        mol = self.mol
-
-        self.mf_elec.kernel()
-        self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
-
-        self.f = self.newton_opt(self.mf_nuc)
-        self.mf_nuc.kernel()
-        self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
-
-        scf_conv = False
-        cycle =0
-
-          

@@ -8,6 +8,7 @@ import numpy
 from pyscf import gto
 from pyscf import scf
 from pyscf import lib
+from pyscf import tdscf
 from pyscf.scf.hf import SCF
 
 
@@ -49,11 +50,12 @@ class HF(SCF):
             mol = self.mol.nuc
 
         mass_proton = 1836.15267343
-        h = gto.moleintor.getints('int1e_kin_sph', mol._atm, mol._bas, mol._env, hermi=1, aosym='s4')/mass_proton
-        h -= gto.moleintor.getints('int1e_nuc_sph', mol._atm, mol._bas, mol._env, hermi=1, aosym='s4')
+        h = mol.intor_symmetric('int1e_kin')/mass_proton
+        h -= mol.intor_symmetric('int1e_nuc')
         if self.dm_elec is not None:
+            #with mol.with_rinv_origin(mol.atom_coord(2)):
+            #print mol._env
             h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')
-        
         return h
 
     def get_occ_nuc(self, nuc_energy=None, nuc_coeff=None):
@@ -127,8 +129,8 @@ class HF(SCF):
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         E_cross = numpy.einsum('ij,ij', jcross, dm_elec)
 
-        print numpy.einsum('ij,ji', mf_nuc.get_hcore(), dm_nuc)
         E_tot = mf_elec.e_tot + mf_nuc.e_tot - mf_nuc.energy_nuc() + E_cross 
+        print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
 
         return E_tot
 
@@ -148,17 +150,21 @@ class HF(SCF):
 
         while not scf_conv and cycle <= max_cycle:
             cycle += 1
+            print 'Cycle:', cycle
             E_last = E_tot
             self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
             self.mf_elec.kernel()
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
             self.mf_nuc.kernel()
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-            print 'Cycle:',cycle
-            print E_tot
+            print 'Total Energy:', E_tot
             if abs(E_tot - E_last) < conv_tot:
                 scf_conv = True
                 print 'Converged!'
-                print numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
+                #charge_center = tdscf.rhf._charge_center(mol)
+                #with mol.nuc.with_common_origin(charge_center):
+                x = numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
+                print x
+                return E_tot
 
 
