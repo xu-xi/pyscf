@@ -8,8 +8,16 @@ from pyscf.neo.rks import KS
 class CDFT(KS):
     '''
     Example:
-    
+
+    >>> mol = neo.Mole()
+    >>> mol.build(atom = 'H 0.0 0.0 0.0; C 0.0 0.0 1.064; N 0.0 0.0 2.220', basis = 'ccpvdz')
+    >>> mol.set_quantum_nuclei([0])
+    >>> mol.set_nuclei_expect_position([0.0, 0.0, -4.87700920e-02], unit='B')
+    >>> mf = neo.CDFT(mol)
+    >>> mf.mf_elec.xc = 'b3lyp'
+    >>> mf.scf()
     '''
+
     def __init__(self, mol):
         KS.__init__(self, mol)
 
@@ -80,7 +88,7 @@ class CDFT(KS):
         self.mf_elec.kernel()
         self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-        self.f = self.newton_opt(self.mf_nuc)
+        #self.f = self.newton_opt(self.mf_nuc)
         h1n = self.mf_nuc.get_hcore()
         s1n = self.mf_nuc.get_ovlp()
         no_energy, no_coeff = scf.hf.eig(h1n, s1n)
@@ -103,7 +111,8 @@ class CDFT(KS):
             self.mf_elec.kernel()
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-            self.f = self.newton_opt(self.mf_nuc)
+            if cycle >= 5: #using pre-converged density can be more stable 
+                self.f = self.newton_opt(self.mf_nuc)
 
             h1n = self.mf_nuc.get_hcore()
             no_energy, no_coeff = scf.hf.eig(h1n, s1n)

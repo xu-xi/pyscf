@@ -53,8 +53,6 @@ class Mole(gto.mole.Mole):
         self.nuc_basis = gto.expand_etbs([(0, 8, alpha, beta), (1, 8, alpha, beta), (2, 8, alpha, beta)]) # even-tempered basis 8s8p8d
         #self.nuc_basis = 'sto3g'
         self.nuc._basis = gto.mole.format_basis({'H': self.nuc_basis}) #only support hydrogen now
-        #self.nuc.basis = {'H': self.nuc_basis, 'C':'sto-3g'}
-        #print self.nuc.basis
         self.nuc._atm, self.nuc._bas, self.nuc._env = gto.mole.make_env(self.nuc._atom,self.nuc._basis, self._env[:gto.PTR_ENV_START])
         for i in range(self.natm):
             if self.quantum_nuc[i] == True:
