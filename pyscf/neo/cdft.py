@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import numpy
+import numpy, sys
 from pyscf import scf
 from pyscf import gto
 from pyscf.neo.rks import KS
@@ -51,6 +51,7 @@ class CDFT(KS):
         ints = mol.nuc.intor_symmetric('int1e_r', comp=3)
 
         de = 1.0/(energy[0] - energy[1:])
+        #print de
 
         ints = numpy.einsum('...pq,p,qj->...j', ints, coeff[:,0].conj(), coeff[:,1:])
         return 2*numpy.einsum('ij,lj,j->il', ints, ints.conj(), de).real
@@ -64,22 +65,28 @@ class CDFT(KS):
         s1n = mf_nuc.get_ovlp()
         no_energy, no_coeff = self.mf_nuc.eig(fock, s1n)
         first_order = numpy.einsum('i,xij,j->x', no_coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), no_coeff[:,0]) - mol.nuclei_expect_position 
-        cycle =0
 
-        while not numpy.linalg.norm(first_order) < 1e-9 and cycle < max_cycle:
-            #print 'first order:', first_order
+        cycle =0
+        conv = False 
+
+        while not conv and cycle < max_cycle:
             cycle += 1
             second_order = self.L_second_order(no_energy, no_coeff)
-            #print 'Condition number of 2nd de:', numpy.linalg.cond(second_order)
-            self.f -= numpy.dot(numpy.linalg.inv(second_order), first_order)
+            self.f -= 0.5*numpy.dot(numpy.linalg.inv(second_order), first_order)
             fock = self.get_hcore_nuc(self.mol.nuc)
             no_energy, no_coeff = self.mf_nuc.eig(fock, s1n)
-            first_order = numpy.einsum('i,xij,j->x', no_coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), no_coeff[:,0]) - mol.nuclei_expect_position 
-            #print 'Norm of 1st de:', numpy.linalg.norm(first_order)
+            first_order = numpy.einsum('i,xij,j->x', no_coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), no_coeff[:,0]) - mol.nuclei_expect_position
 
-        print 'Norm of 1st de:', numpy.linalg.norm(first_order)
-        print 'f:', self.f
-        return self.f
+            if numpy.linalg.norm(first_order) < 1e-9:
+                conv = True
+
+        if conv:
+            print 'Norm of 1st de:', numpy.linalg.norm(first_order)
+            print 'f:', self.f
+            return self.f
+        else:
+            print 'Error: NOT convergent for the optimation of f.'
+            sys.exit(1)
 
     def scf(self, conv_tot=1e-7):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
@@ -91,10 +98,12 @@ class CDFT(KS):
         #self.f = self.newton_opt(self.mf_nuc)
         h1n = self.mf_nuc.get_hcore()
         s1n = self.mf_nuc.get_ovlp()
-        no_energy, no_coeff = scf.hf.eig(h1n, s1n)
-        no_occ = numpy.zeros(len(no_energy))
-        no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
-        self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
+        #no_energy, no_coeff = scf.hf.eig(h1n, s1n)
+        #no_occ = numpy.zeros(len(no_energy))
+        #no_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
+        #self.dm_nuc = scf.hf.make_rdm1(no_coeff, no_occ)
+        self.mf_nuc.kernel()
+        self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
 
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), self.dm_nuc, scripts='i    jkl,lk->ij', aosym = 's4')
         hr = numpy.einsum('xij,x->ij', mol.nuc.intor_symmetric('int1e_r', comp=3), self.f)
