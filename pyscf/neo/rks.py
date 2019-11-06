@@ -21,6 +21,7 @@ class KS(HF):
 
     def __init__(self, mol):
         HF.__init__(self, mol)
+
         self.mf_elec = dft.RKS(mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec

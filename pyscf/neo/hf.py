@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 '''
-Nuclear Electronic Orbital Hartree Fock (NEO-HF)
+Nuclear Electronic Orbital Hartree-Fock (NEO-HF)
 '''
 
 import numpy
@@ -36,10 +36,10 @@ class HF(SCF):
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
 
-        self.mf_nuc = scf.RHF(mol.nuc)
+        self.mf_nuc = scf.RHF(mol.nuc) #test
         self.mf_nuc.get_init_guess = self.get_init_guess_nuc
         self.mf_nuc.get_hcore = self.get_hcore_nuc
-        self.mf_nuc.get_veff = self.get_veff_nuc
+        self.mf_nuc.get_veff = self.get_veff_nuc_bare
         self.mf_nuc.get_occ = self.get_occ_nuc
 
     def get_hcore_nuc(self, mol=None):
@@ -59,8 +59,12 @@ class HF(SCF):
     def get_occ_nuc(self, nuc_energy=None, nuc_coeff=None):
         'label the occupation for protons (high-spin)'
 
-        nuc_occ = numpy.zeros(len(nuc_energy))
-        nuc_occ[:self.mol.nuc_num] = 1
+        e_idx = numpy.argsort(nuc_energy)
+        e_sort = nuc_energy[e_idx]
+        nuc_occ = numpy.zeros(nuc_energy.size)
+        nocc = self.mol.nuc_num
+        nuc_occ[e_idx[:nocc]] = 1
+
         return nuc_occ
 
     def get_init_guess_nuc(self, mol=None, key=None):
@@ -74,8 +78,7 @@ class HF(SCF):
         h1n = self.get_hcore_nuc(mol)
         s1n = scf.hf.get_ovlp(mol)
         nuc_energy, nuc_coeff = scf.hf.eig(h1n, s1n)
-        nuc_occ = numpy.zeros(len(nuc_energy))
-        nuc_occ[:mol.nuc_num] = 1 #high-spin quantum nuclei
+        nuc_occ = self.get_occ_nuc(nuc_energy, nuc_coeff)
 
         return scf.hf.make_rdm1(nuc_coeff, nuc_occ)
     
@@ -99,8 +102,12 @@ class HF(SCF):
 
         return vj - vk * .5 - jcross
 
+    def get_veff_nuc_bare(self, mol, dm, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
+        'NOTE: Only for single quantum proton system.'
+        return numpy.zeros((mol.nao_nr(), mol.nao_nr()))
+
     def get_veff_nuc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
-        'get the HF effective potential for quantum nuclei in NEO for given density matrixes of electrons and quantum nuclei'
+        'get the HF effective potential for quantum nuclei in NEO'
 
         if dm_last is None:
             vj, vk = scf.jk.get_jk(mol, (dm, dm), ('ijkl,ji->kl','ijkl,jk->il'), aosym='s8')
@@ -128,13 +135,11 @@ class HF(SCF):
         E_cross = numpy.einsum('ij,ij', jcross, dm_elec)
 
         E_tot = mf_elec.e_tot + mf_nuc.e_tot - mf_nuc.energy_nuc() + E_cross 
-        print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
-
+        #print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
         return E_tot
 
-
-    def scf(self, conv_tot = 1e-7):
-        max_cycle = 100
+    def scf(self, conv_tol = 1e-7, max_cycle = 100):
+        'self-consistent field driver for NEO'
         mol = self.mol
 
         self.mf_elec.kernel()
@@ -156,13 +161,11 @@ class HF(SCF):
             self.mf_nuc.kernel()
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             print 'Total Energy:', E_tot
-            if abs(E_tot - E_last) < conv_tot:
+            if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
                 print 'Converged!'
-                #charge_center = tdscf.rhf._charge_center(mol)
-                #with mol.nuc.with_common_origin(charge_center):
                 x = numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
-                print x
+                print 'Positional expectation value:', x
                 return E_tot
 
 
