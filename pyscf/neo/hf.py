@@ -153,14 +153,13 @@ class HF(SCF):
 
         while not scf_conv and cycle <= max_cycle:
             cycle += 1
-            print 'Cycle:', cycle
             E_last = E_tot
             self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
             self.mf_elec.kernel(dm0 = dm0_elec)
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
             self.mf_nuc.kernel(dm0 = dm0_nuc)
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-            print 'Total Energy of NEO:', E_tot
+            print 'Cycle %i Total Energy of NEO: %s' %(cycle, E_tot)
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
                 print 'Converged!'

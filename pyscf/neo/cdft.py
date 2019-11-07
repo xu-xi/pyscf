@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import numpy, sys
+import sys, numpy, scipy
 from pyscf import scf
 from pyscf import gto
 from pyscf.neo.rks import KS
@@ -43,8 +43,22 @@ class CDFT(KS):
 
         return h
 
+    def L_first_order(self, f):
+        'The first order derivative of L w.r.t the Lagrange multiplier f'
+        mol = self.mol
+        self.f = f 
+
+        fock = self.mf_nuc.get_fock(dm = self.dm_nuc)
+        s1n = self.mf_nuc.get_ovlp()
+        energy, coeff = self.mf_nuc.eig(fock, s1n)
+        occ = self.mf_nuc.get_occ(energy, coeff)
+        self.dm_nuc = scf.hf.make_rdm1(coeff, occ)
+        first_order = numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mol.nuclei_expect_position 
+
+        return first_order
+
     def L_second_order(self, energy, coeff):
-        'calculate the second order of L w.r.t the lagrange multiplier f'
+        'The second order of L w.r.t the Lagrange multiplier f'
         mol = self.mol
         ints = mol.nuc.intor_symmetric('int1e_r', comp=3)
 
@@ -104,49 +118,53 @@ class CDFT(KS):
             print 'Error: NOT convergent'
             sys.exit(1)
 
-    def newton_opt(self, mf, conv_tol = 1e-10, max_cycle = 50):
-        'Newton optimization'
+    def optimal_f(self, mf, conv_tol = 1e-10, max_cycle = 50, method = 1):
+        'optimization of f'
         mol = self.mol
 
-        s1n = mf.get_ovlp()
         energy = mf.mo_energy
         coeff = mf.mo_coeff
 
-        cycle =0
-        conv = False
+        first_order = numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mol.nuclei_expect_position
 
-        while not conv and cycle < max_cycle:
+        cycle = 0
+
+        while numpy.linalg.norm(first_order) > conv_tol:
             cycle += 1
-            first_order = numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mol.nuclei_expect_position
-
-            if numpy.linalg.norm(first_order) < conv_tol:
-                conv = True
-            else:
+            if method == 1:
+                gamma = 0.5
+                self.f += gamma*first_order #test
+            elif method == 2:
                 second_order = self.L_second_order(energy, coeff)
+                #print '2nd:', second_order
                 self.f -= 0.5*numpy.dot(numpy.linalg.inv(second_order), first_order) #test
-                fock = mf.get_fock(dm = self.dm_nuc)
-                energy, coeff = mf.eig(fock, s1n)
-                occ = mf.get_occ(energy, coeff)
-                self.dm_nuc = scf.hf.make_rdm1(coeff, occ)
+            else:
+                raise ValueError('Unsupported method for optimization of f.')
 
-        if conv:
+            print '1st:', first_order
+            print 'f:', self.f
+            fock = mf.get_fock(dm = self.dm_nuc)
+            energy, coeff = mf.eig(fock, s1n)
+            occ = mf.get_occ(energy, coeff)
+            self.dm_nuc = scf.hf.make_rdm1(coeff, occ)
+
+            if cycle >= max_cycle:
+                print 'Error: NOT convergent for the optimation of f.'
+                sys.exit(1)
+        else:
             print 'Norm of 1st de:', numpy.linalg.norm(first_order)
             print 'f:', self.f
             return self.f
-        else:
-            print 'Error: NOT convergent for the optimation of f.'
-            sys.exit(1)
 
     def inner_scf(self, conv_tol = 1e-7, max_cycle = 100):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
         mol = self.mol
 
-        #self.mf_elec.kernel()
-        #self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
+        self.mf_elec.kernel()
+        self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-        #self.mf_nuc.kernel()
-        #self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
-        self.scf()
+        self.mf_nuc.kernel()
+        self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
@@ -158,7 +176,11 @@ class CDFT(KS):
             E_last = E_tot
 
             if cycle >= 1: #using pre-converged density can be more stable 
-                self.f = self.newton_opt(self.mf_nuc)
+                #self.f = self.optimal_f(self.mf_nuc)
+                opt = scipy.optimize.root(self.L_first_order, self.f, method='broyden1')
+                self.f = opt.x
+                print 'f:', self.f
+                print '1st:', opt.fun
 
             self.mf_elec.kernel()
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
@@ -168,8 +190,7 @@ class CDFT(KS):
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
-            print 'Cycle',cycle
-            print 'Total energy of cNEO:', E_tot
+            print 'Cycle %i Total energy of cNEO: %s' %(cycle, E_tot)
 
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
