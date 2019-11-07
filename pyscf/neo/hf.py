@@ -138,14 +138,14 @@ class HF(SCF):
         #print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
         return E_tot
 
-    def scf(self, conv_tol = 1e-7, max_cycle = 100):
+    def scf(self, conv_tol = 1e-7, max_cycle = 100, dm0_elec = None, dm0_nuc = None):
         'self-consistent field driver for NEO'
         mol = self.mol
 
-        self.mf_elec.kernel()
+        self.mf_elec.kernel(dm0 = dm0_elec)
         self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-        self.mf_nuc.kernel()
+        self.mf_nuc.kernel(dm0 = dm0_nuc)
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
         scf_conv = False
@@ -156,11 +156,11 @@ class HF(SCF):
             print 'Cycle:', cycle
             E_last = E_tot
             self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
-            self.mf_elec.kernel()
+            self.mf_elec.kernel(dm0 = dm0_elec)
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
-            self.mf_nuc.kernel()
+            self.mf_nuc.kernel(dm0 = dm0_nuc)
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-            print 'Total Energy:', E_tot
+            print 'Total Energy of NEO:', E_tot
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
                 print 'Converged!'

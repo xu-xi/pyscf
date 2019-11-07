@@ -89,12 +89,17 @@ class CDFT(KS):
                 second_order = self.L_second_order(self.mf_nuc.mo_energy, self.mf_nuc.mo_coeff)
                 print '2nd:', second_order
                 self.f -= numpy.dot(numpy.linalg.inv(second_order), first_order)
-                self.scf()
+                print 'f:', self.f
+                #self.scf(dm0_elec = self.dm_elec, dm0_nuc = self.dm_nuc)
+                E_tot = self.scf()
+                #self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
+                #self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
+                #print 'Energy_nuc:', self.mf_nuc.mo_energy
 
         if conv:
             print 'Norm of 1st de:', numpy.linalg.norm(first_order)
             print 'f:', self.f
-            return self.f
+            return E_tot
         else:
             print 'Error: NOT convergent'
             sys.exit(1)
@@ -118,7 +123,7 @@ class CDFT(KS):
                 conv = True
             else:
                 second_order = self.L_second_order(energy, coeff)
-                self.f -= numpy.dot(numpy.linalg.inv(second_order), first_order)
+                self.f -= 0.5*numpy.dot(numpy.linalg.inv(second_order), first_order) #test
                 fock = mf.get_fock(dm = self.dm_nuc)
                 energy, coeff = mf.eig(fock, s1n)
                 occ = mf.get_occ(energy, coeff)
@@ -136,11 +141,12 @@ class CDFT(KS):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
         mol = self.mol
 
-        self.mf_elec.kernel()
-        self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
+        #self.mf_elec.kernel()
+        #self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-        self.mf_nuc.kernel()
-        self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
+        #self.mf_nuc.kernel()
+        #self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
+        self.scf()
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
