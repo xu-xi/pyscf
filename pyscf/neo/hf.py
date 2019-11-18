@@ -4,11 +4,12 @@
 Nuclear Electronic Orbital Hartree-Fock (NEO-HF)
 '''
 
-import numpy
+import sys, numpy
 from pyscf import gto
 from pyscf import scf
 from pyscf import lib
 from pyscf import tdscf
+from pyscf.lib import logger
 from pyscf.scf.hf import SCF
 
 
@@ -138,28 +139,34 @@ class HF(SCF):
         #print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
         return E_tot
 
-    def scf(self, conv_tol = 1e-7, max_cycle = 100, dm0_elec = None, dm0_nuc = None):
+    def scf(self, conv_tol = 1e-7, max_cycle = 60, dm0_elec = None, dm0_nuc = None):
         'self-consistent field driver for NEO'
         mol = self.mol
 
-        self.mf_elec.kernel(dm0 = dm0_elec)
+        self.mf_elec.kernel()
         self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
 
-        self.mf_nuc.kernel(dm0 = dm0_nuc)
+        self.mf_nuc.kernel()
+
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
         scf_conv = False
         cycle = 0
 
-        while not scf_conv and cycle <= max_cycle:
+        while not scf_conv:
             cycle += 1
+            if cycle > max_cycle:
+                print 'ERROR: SCF is not convergent within %i cycles' %(max_cycle)
+                sys.exit(1)
+
             E_last = E_tot
             self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
-            self.mf_elec.kernel(dm0 = dm0_elec)
+            self.mf_elec.kernel()
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
-            self.mf_nuc.kernel(dm0 = dm0_nuc)
+            self.mf_nuc.kernel()
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             print 'Cycle %i Total Energy of NEO: %s' %(cycle, E_tot)
+            #logger.info('Cycle %i Total Energy of NEO: %s' %(cycle, E_tot))
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
                 print 'Converged!'
