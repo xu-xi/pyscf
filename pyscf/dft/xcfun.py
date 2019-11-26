@@ -233,7 +233,9 @@ VV10_DAT = {
 VV10_XC = set(VV10_DAT.keys())
 
 def xc_type(xc_code):
-    if isinstance(xc_code, str):
+    if xc_code is None:
+        return None
+    elif isinstance(xc_code, str):
         if is_nlc(xc_code):
             return 'NLC'
         hyb, fn_facs = parse_xc(xc_code)
@@ -348,8 +350,10 @@ def parse_xc(description):
       contribution has been included.
     '''
     hyb = [0, 0, 0]  # hybrid, alpha, omega
-    if isinstance(description, int):
-        return 0, [(description, 1.)]
+    if description is None:
+        return hyb, []
+    elif isinstance(description, int):
+        return hyb, [(description, 1.)]
     elif not isinstance(description, str): #isinstance(description, (tuple,list)):
         return parse_xc('%s,%s' % tuple(description))
 
@@ -934,8 +938,11 @@ def define_xc_(ni, description, xctype='LDA', hyb=0, rsh=(0,0,0)):
             'LDA' or 'GGA' or 'MGGA'
         hyb : float
             hybrid functional coefficient
-        rsh : float
-            coefficients for range-separated hybrid functional
+        rsh : a list of three floats
+            coefficients (omega, alpha, beta) for range-separated hybrid functional.
+            omega is the exponent factor in attenuated Coulomb operator e^{-omega r_{12}}/r_{12}
+            alpha is the coefficient for long-range part, hybrid coefficient
+            can be obtained by alpha + beta
 
     Examples:
 
@@ -962,6 +969,7 @@ def define_xc_(ni, description, xctype='LDA', hyb=0, rsh=(0,0,0)):
         ni.eval_xc = lambda xc_code, rho, *args, **kwargs: \
                 eval_xc(description, rho, *args, **kwargs)
         ni.hybrid_coeff = lambda *args, **kwargs: hybrid_coeff(description)
+        ni.rsh_coeff = lambda *args: rsh_coeff(description)
         ni._xc_type = lambda *args: xc_type(description)
 
     elif callable(description):

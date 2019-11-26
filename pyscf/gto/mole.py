@@ -895,7 +895,13 @@ def tot_electrons(mol):
     >>> mol.tot_electrons()
     6
     '''
-    nelectron = mol.atom_charges().sum() - mol.charge
+    if mol._atm.size != 0:
+        nelectron = mol.atom_charges().sum()
+    elif mol._atom:
+        nelectron = sum(charge(a[0]) for a in mol._atom)
+    else:
+        nelectron = sum(charge(a[0]) for a in format_atom(mol.atom))
+    nelectron -= mol.charge
     return int(nelectron)
 
 def copy(mol):
@@ -1974,7 +1980,7 @@ class Mole(lib.StreamObject):
     def build(self, dump_input=True, parse_arg=True,
               verbose=None, output=None, max_memory=None,
               atom=None, basis=None, unit=None, nucmod=None, ecp=None,
-              charge=None, spin=None, symmetry=None, symmetry_subgroup=None,
+              charge=None, spin=0, symmetry=None, symmetry_subgroup=None,
               cart=None):
         '''Setup moleclue and initialize some control parameters.  Whenever you
         change the value of the attributes of :class:`Mole`, you need call
@@ -2024,7 +2030,7 @@ class Mole(lib.StreamObject):
         if nucmod is not None: self.nucmod = nucmod
         if ecp is not None: self.ecp = ecp
         if charge is not None: self.charge = charge
-        if spin is not None: self.spin = spin
+        if spin is not 0: self.spin = spin
         if symmetry is not None: self.symmetry = symmetry
         if symmetry_subgroup is not None: self.symmetry_subgroup = symmetry_subgroup
         if cart is not None: self.cart = cart
@@ -2121,9 +2127,12 @@ class Mole(lib.StreamObject):
         self._atm, self._ecpbas, self._env = \
                 self.make_ecp_env(self._atm, self._ecp, self._env)
 
-        # Access self.nelec in which the code checks whether the spin and
-        # number of electrons are consistent.
-        self.nelec
+        if self.spin is None:
+            self.spin = self.nelectron % 2
+        else:
+            # Access self.nelec in which the code checks whether the spin and
+            # number of electrons are consistent.
+            self.nelec
 
         if self.symmetry:
             from pyscf import symm

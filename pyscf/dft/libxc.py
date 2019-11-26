@@ -650,7 +650,9 @@ PROBLEMATIC_XC = dict([(XC_CODES[x], x) for x in
                         'XC_MGGA_C_TPSSLOC', 'XC_HYB_MGGA_XC_TPSSH')])
 
 def xc_type(xc_code):
-    if isinstance(xc_code, str):
+    if xc_code is None:
+        return None
+    elif isinstance(xc_code, str):
         if is_nlc(xc_code):
             return 'NLC'
         hyb, fn_facs = parse_xc(xc_code)
@@ -671,7 +673,9 @@ def is_lda(xc_code):
     return xc_type(xc_code) == 'LDA'
 
 def is_hybrid_xc(xc_code):
-    if isinstance(xc_code, str):
+    if xc_code is None:
+        return False
+    elif isinstance(xc_code, str):
         if xc_code.isdigit():
             return _itrf.LIBXC_is_hybrid(ctypes.c_int(int(xc_code)))
         else:
@@ -742,8 +746,8 @@ def nlc_coeff(xc_code):
 def rsh_coeff(xc_code):
     '''Range-separated parameter and HF exchange components: omega, alpha, beta
 
-    Exc_RSH = c_SR * SR_HFX + c_LR * LR_HFX + (1-c_SR) * Ex_SR + (1-c_LR) * Ex_LR + Ec
-            = alpha * HFX + beta * SR_HFX + (1-c_SR) * Ex_SR + (1-c_LR) * Ex_LR + Ec
+    Exc_RSH = c_LR * LR_HFX + c_SR * SR_HFX + (1-c_SR) * Ex_SR + (1-c_LR) * Ex_LR + Ec
+            = alpha * HFX   + beta * SR_HFX + (1-c_SR) * Ex_SR + (1-c_LR) * Ex_LR + Ec
             = alpha * LR_HFX + hyb * SR_HFX + (1-c_SR) * Ex_SR + (1-c_LR) * Ex_LR + Ec
 
     SR_HFX = < pi | e^{-omega r_{12}}/r_{12} | iq >
@@ -751,7 +755,9 @@ def rsh_coeff(xc_code):
     alpha = c_LR
     beta = c_SR - c_LR = hyb - alpha
     '''
-    if isinstance(xc_code, str) and ',' in xc_code:
+    if xc_code is None:
+        return 0, 0, 0
+    elif isinstance(xc_code, str) and ',' in xc_code:
         # Parse only X part for the RSH coefficients.  This is to handle
         # exceptions for C functionals such as M11.
         xc_code = xc_code.split(',')[0] + ','
@@ -889,7 +895,9 @@ def parse_xc(description):
         see also libxc_itrf.c
     '''
     hyb = [0, 0, 0]  # hybrid, alpha, omega (== SR_HF, LR_HF, omega)
-    if isinstance(description, int):
+    if description is None:
+        return hyb, []
+    elif isinstance(description, int):
         return hyb, [(description, 1.)]
     elif not isinstance(description, str): #isinstance(description, (tuple,list)):
         return parse_xc('%s,%s' % tuple(description))
@@ -1293,8 +1301,11 @@ def define_xc_(ni, description, xctype='LDA', hyb=0, rsh=(0,0,0)):
             'LDA' or 'GGA' or 'MGGA'
         hyb : float
             hybrid functional coefficient
-        rsh : float
-            coefficients for range-separated hybrid functional
+        rsh : a list of three floats
+            coefficients (omega, alpha, beta) for range-separated hybrid functional.
+            omega is the exponent factor in attenuated Coulomb operator e^{-omega r_{12}}/r_{12}
+            alpha is the coefficient for long-range part, hybrid coefficient
+            can be obtained by alpha + beta
 
     Examples:
 
