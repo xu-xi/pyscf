@@ -24,6 +24,7 @@ class CDFT(KS):
 
         self.f = numpy.zeros(3) 
         self.mf_nuc.get_hcore = self.get_hcore_nuc
+        self.scf = self.inner_scf
 
     def get_hcore_nuc(self, mol=None):
         'get core Hamiltonian for quantum nuclei'
@@ -166,6 +167,7 @@ class CDFT(KS):
             print 'Norm of 1st de:', numpy.linalg.norm(first_order)
             print 'f:', self.f
             return self.f
+
 
     def inner_scf(self, conv_tol = 1e-7, max_cycle = 100):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
