@@ -10,6 +10,7 @@ from pyscf import grad
 from pyscf import lib
 from pyscf.lib import logger
 from pyscf.neo import CDFT
+from pyscf.grad.rhf import _write
 
 class Gradients(lib.StreamObject):
     '''
@@ -31,6 +32,7 @@ class Gradients(lib.StreamObject):
         self.mol = scf_method.mol
         self.base = scf_method
         self.scf = scf_method
+        self.verbose = 4
         atmlst = self.mol.quantum_nuc
         self.atmlst = [i for i in range(len(atmlst)) if atmlst[i] == False] # a list for classical nuclei
 
@@ -38,6 +40,7 @@ class Gradients(lib.StreamObject):
 
     def grad_elec(self, atmlst=None):
         g = self.scf.mf_elec.nuc_grad_method()
+        g.verbose = 2
         return g.grad(atmlst = atmlst)
 
     def hcore_deriv(self, atm_id): #beta
@@ -80,21 +83,22 @@ class Gradients(lib.StreamObject):
 
         grad_elec = self.grad_elec(atmlst = self.atmlst)
         de[self.atmlst] += grad_elec
+        self.de = de
         self._finalize()
-        return de
+        return self.de
     
     def _finalize(self):
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s gradients ---------------',
                         self.base.__class__.__name__)
-            _write(self, self.mol, self.de, self.atmlst)
+            _write(self, self.mol, self.de, None)
             logger.note(self, '----------------------------------------------')
 
     def as_scanner(self):
         if isinstance(self, lib.GradScanner):
             return self
 
-        #logger.info(self, 'Create scanner for %s', self.__class__)
+        logger.info(self, 'Create scanner for %s', self.__class__)
 
         class SCF_GradScanner(self.__class__, lib.GradScanner):
             def __init__(self, g):
@@ -106,16 +110,10 @@ class Gradients(lib.StreamObject):
                     mol = self.mol.set_geom_(mol_or_geom, inplace=True)
 
                 mol.set_quantum_nuclei([0])
-                #geom = mol.atom_coords()
-                #mol.elec.set_geom_(geom)
-                #mol.nuc.set_geom_(geom)
                 self.mol = self.base.mol = mol
-                #print 'grad.py', self.mol.elec.atom_coords()
                 mf_scanner = self.base
                 e_tot = mf_scanner(mol)
                 de = self.kernel(**kwargs)
-                print 'e_tot', e_tot
-                print 'de', de
                 return e_tot, de
 
         return SCF_GradScanner(self)

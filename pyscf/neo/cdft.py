@@ -5,6 +5,7 @@ from pyscf import scf
 from pyscf import gto
 from pyscf import dft 
 from pyscf.neo.rks import KS
+from pyscf.lib import logger
 
 class CDFT(KS):
     '''
@@ -115,8 +116,7 @@ class CDFT(KS):
             cycle += 1
             
             if cycle > max_cycle:
-                print 'ERROR: not convergent for the optimization of f in %i cycles' %(max_cycle)
-                sys.exit(1)
+                raise RuntimeError('Not convergent for the optimization of f in %i cycles' %(max_cycle))
             elif cycle <= 2:
                 gamma = 1
             else:
@@ -169,9 +169,8 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-10, max_cycle = 100, **kwargs):
+    def inner_scf(self, conv_tol = 1e-8, max_cycle = 100, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
-        #print 'cdft', self.mol.elec.atom_coords()
 
         #self.dm_elec = None
         #self.dm_nuc = None
@@ -209,8 +208,8 @@ class CDFT(KS):
                 #self.f = self.optimal_f(self.mf_nuc)
                 opt = scipy.optimize.root(self.L_first_order, self.f, method='hybr')
                 self.f = opt.x
-                print 'f:', self.f
-                print '1st:', opt.fun
+                logger.info(self, 'f: %s', self.f)
+                logger.info(self, '1st de of L: %s', opt.fun)
 
             #self.dm_nuc = self.mf_nuc.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
             self.mf_elec.kernel()
@@ -221,13 +220,13 @@ class CDFT(KS):
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             #first_order = self.L_first_order(self.f)
 
-            print 'Cycle %i Total energy of cNEO: %s' %(cycle, E_tot)
-            #print '1st:', first_order
+            logger.info(self, 'Cycle %i Total energy of cNEO: %.15g' %(cycle, E_tot))
 
             if abs(E_tot - E_last) < conv_tol:
                 self.converged = True
-                print 'Converged'
-                print 'Positional expectation value:', numpy.einsum('xij,ji->x', self.mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
+                logger.note(self, 'converged cNEO energy = %.15g', E_tot)
+                position = numpy.einsum('xij,ji->x', self.mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
+                logger.info(self, 'Positional expectation value: %s', position)
                 return E_tot
 
     def nuc_grad_method(self):

@@ -4,11 +4,10 @@
 Nuclear Electronic Orbital Hartree-Fock (NEO-HF)
 '''
 
-import sys, numpy
+import numpy
 from pyscf import gto
 from pyscf import scf
 from pyscf import lib
-from pyscf import tdscf
 from pyscf.lib import logger
 from pyscf.scf.hf import SCF
 
@@ -43,6 +42,8 @@ class HF(SCF):
         self.mf_nuc.get_hcore = self.get_hcore_nuc
         self.mf_nuc.get_veff = self.get_veff_nuc_bare
         self.mf_nuc.get_occ = self.get_occ_nuc
+
+        self.verbose = 4
 
     def get_hcore_nuc(self, mol=None):
         'get core Hamiltonian for quantum nuclei'
@@ -136,8 +137,13 @@ class HF(SCF):
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         E_cross = numpy.einsum('ij,ij', jcross, dm_elec)
 
-        E_tot = mf_elec.e_tot + mf_nuc.e_tot - mf_nuc.energy_nuc() + E_cross 
-        #print mf_elec.e_tot, mf_nuc.e_tot, mf_nuc.energy_nuc(), E_cross
+        E_tot = mf_elec.e_tot + mf_nuc.e_tot - mf_nuc.energy_nuc() + E_cross
+
+        logger.debug(self, 'Energy of electrons: %s',  mf_elec.e_tot)
+        logger.debug(self, 'Energy of quantum nuclei: %s', mf_nuc.e_tot)
+        logger.debug(self, 'Energy of classcial nuclei: %s', mf_nuc.energy_nuc())
+        logger.debug(self, 'Energy of e-p Comlomb interaction: %s', E_cross)
+
         return E_tot
 
     def scf(self, conv_tol = 1e-7, max_cycle = 60, dm0_elec = None, dm0_nuc = None):
@@ -157,8 +163,7 @@ class HF(SCF):
         while not scf_conv:
             cycle += 1
             if cycle > max_cycle:
-                print 'ERROR: SCF is not convergent within %i cycles' %(max_cycle)
-                sys.exit(1)
+                raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
             self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
@@ -166,13 +171,8 @@ class HF(SCF):
             self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
             self.mf_nuc.kernel()
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-            print 'Cycle %i Total Energy of NEO: %s' %(cycle, E_tot)
-            #logger.info('Cycle %i Total Energy of NEO: %s' %(cycle, E_tot))
+            logger.info(self, 'Cycle %i Total Energy of NEO: %s' %(cycle, E_tot))
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
-                print 'Converged!'
-                x = numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
-                print 'Positional expectation value:', x
+                logger.note(self, 'converged NEO energy = %.15g', E_tot) 
                 return E_tot
-
-
