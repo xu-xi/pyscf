@@ -3,8 +3,8 @@
 import sys, numpy, scipy, copy
 from pyscf import scf
 from pyscf import gto
+from pyscf import dft 
 from pyscf.neo.rks import KS
-from pyscf.tdscf.rhf import _charge_center
 
 class CDFT(KS):
     '''
@@ -21,8 +21,8 @@ class CDFT(KS):
 
     def __init__(self, mol):
         KS.__init__(self, mol)
-
         self.f = numpy.zeros(3) 
+        self.mol = mol
         self.mf_nuc.get_hcore = self.get_hcore_nuc
         self.scf = self.inner_scf
 
@@ -82,8 +82,8 @@ class CDFT(KS):
         'Total energy for cNEO'
         mol = self.mol
 
-        dm_elec = self.mf_elec.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
-        dm_nuc = self.mf_nuc.make_rdm1(mf_nuc.mo_coeff, mf_nuc.mo_occ)
+        dm_elec = mf_elec.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+        dm_nuc = mf_nuc.make_rdm1(mf_nuc.mo_coeff, mf_nuc.mo_occ)
 
         jcross = scf.jk.get_jk((mol.elec, mol.elec, mol.nuc, mol.nuc), dm_nuc, scripts='ijkl,lk->ij', aosym = 's4')
         E_cross = numpy.einsum('ij,ij', jcross, dm_elec)
@@ -169,9 +169,26 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-7, max_cycle = 100):
+    def inner_scf(self, conv_tol = 1e-10, max_cycle = 100, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
-        mol = self.mol
+        #print 'cdft', self.mol.elec.atom_coords()
+
+        #self.dm_elec = None
+        #self.dm_nuc = None
+
+        '''
+        self.mf_elec = dft.RKS(self.mol.elec)
+        self.mf_elec.init_guess = 'atom'
+        self.mf_elec.xc = 'b3lyp'
+        self.mf_elec.grids.level = 5
+        self.mf_elec.get_hcore = self.get_hcore_elec
+
+        self.mf_nuc = scf.RHF(self.mol.nuc) #beta: for single proton
+        self.mf_nuc.get_init_guess = self.get_init_guess_nuc
+        self.mf_nuc.get_hcore = self.get_hcore_nuc
+        self.mf_nuc.get_veff = self.get_veff_nuc_bare
+        self.mf_nuc.get_occ = self.get_occ_nuc
+        '''
 
         self.mf_elec.kernel()
         self.dm_elec = self.mf_elec.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
@@ -181,14 +198,14 @@ class CDFT(KS):
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
 
-        scf_conv = False
+        self.converged = False
         cycle = 0
 
-        while not scf_conv and cycle < max_cycle:
+        while not self.converged and cycle < max_cycle:
             cycle += 1
             E_last = E_tot
 
-            if cycle >= 8: #using pre-converged density can be more stable 
+            if cycle >= 1: #using pre-converged density can be more stable 
                 #self.f = self.optimal_f(self.mf_nuc)
                 opt = scipy.optimize.root(self.L_first_order, self.f, method='hybr')
                 self.f = opt.x
@@ -208,8 +225,11 @@ class CDFT(KS):
             #print '1st:', first_order
 
             if abs(E_tot - E_last) < conv_tol:
-                scf_conv = True
+                self.converged = True
                 print 'Converged'
-                print 'Positional expectation value:', numpy.einsum('xij,ji->x', mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
+                print 'Positional expectation value:', numpy.einsum('xij,ji->x', self.mol.nuc.intor_symmetric('int1e_r', comp=3), self.dm_nuc)
                 return E_tot
 
+    def nuc_grad_method(self):
+        from pyscf.neo.grad import Gradients
+        return Gradients(self)

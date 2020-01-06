@@ -4,10 +4,14 @@
 Analytical nuclear gradient for constrained nuclear-electronic orbital
 '''
 import numpy
+from pyscf import gto
 from pyscf import scf
 from pyscf import grad
+from pyscf import lib
+from pyscf.lib import logger
+from pyscf.neo import CDFT
 
-class Gradients():
+class Gradients(lib.StreamObject):
     '''
     Example:
 
@@ -26,11 +30,14 @@ class Gradients():
     def __init__(self, scf_method):
         self.mol = scf_method.mol
         self.base = scf_method
+        self.scf = scf_method
         atmlst = self.mol.quantum_nuc
         self.atmlst = [i for i in range(len(atmlst)) if atmlst[i] == False] # a list for classical nuclei
 
+    #as_scanner = grad.rhf.as_scanner
+
     def grad_elec(self, atmlst=None):
-        g = self.base.mf_elec.nuc_grad_method()
+        g = self.scf.mf_elec.nuc_grad_method()
         return g.grad(atmlst = atmlst)
 
     def hcore_deriv(self, atm_id): #beta
@@ -43,25 +50,18 @@ class Gradients():
 
         return vrinv + vrinv.transpose(0,2,1)
 
-    def make_rdm1e(self):
-        mo_energy = self.base.mf_nuc.mo_energy
-        mo_coeff = self.base.mf_nuc.mo_coeff
-        mo_occ = self.base.mf_nuc.occ
-
-        mo0 = mo_coeff[:,mo_occ>0]
-        mo0e = mo0 * (mo_energy[mo_occ>0] * mo_occ[mo_occ>0])
-        return numpy.dot(mo0e, mo0.T.conj())
-
     def grad_jcross(self):
         'get the gradient for the cross term of Coulomb interactions between electrons and quantum nuclei'
-        jcross = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc, self.mol.nuc), self.base.dm_nuc, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)
+        jcross = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc, self.mol.nuc), self.scf.dm_nuc, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)
         return -jcross
 
     def grad_quantum_nuc(self):
         'JCP, ...'
-        return -self.base.f
+        a = 2*numpy.einsum('ijk,jk->i', self.mol.nuc.intor('int1e_irp'), self.scf.dm_nuc)
+        return numpy.dot(self.scf.f, a.reshape(3,3))
 
     def kernel(self, atmlst=None):
+        'Unit: Hartree/Bohr'
         if atmlst == None:
             atmlst = range(self.mol.natm)
         de = numpy.zeros((len(atmlst), 3))
@@ -75,10 +75,50 @@ class Gradients():
             else:
                 p0, p1 = aoslices[ia,2:]
                 h1ao = self.hcore_deriv(ia)
-                de[k] += numpy.einsum('xij,ij->x', h1ao, self.base.dm_nuc)
-                de[k] -= numpy.einsum('xij,ij->x', jcross[:,p0:p1], self.base.dm_elec[p0:p1]) * 2
+                de[k] += numpy.einsum('xij,ij->x', h1ao, self.scf.dm_nuc)
+                de[k] -= numpy.einsum('xij,ij->x', jcross[:,p0:p1], self.scf.dm_elec[p0:p1]) * 2
 
         grad_elec = self.grad_elec(atmlst = self.atmlst)
         de[self.atmlst] += grad_elec
+        self._finalize()
         return de
+    
+    def _finalize(self):
+        if self.verbose >= logger.NOTE:
+            logger.note(self, '--------------- %s gradients ---------------',
+                        self.base.__class__.__name__)
+            _write(self, self.mol, self.de, self.atmlst)
+            logger.note(self, '----------------------------------------------')
 
+    def as_scanner(self):
+        if isinstance(self, lib.GradScanner):
+            return self
+
+        #logger.info(self, 'Create scanner for %s', self.__class__)
+
+        class SCF_GradScanner(self.__class__, lib.GradScanner):
+            def __init__(self, g):
+                lib.GradScanner.__init__(self, g)
+            def __call__(self, mol_or_geom, **kwargs):
+                if isinstance(mol_or_geom, gto.Mole):
+                    mol = mol_or_geom
+                else:
+                    mol = self.mol.set_geom_(mol_or_geom, inplace=True)
+
+                mol.set_quantum_nuclei([0])
+                #geom = mol.atom_coords()
+                #mol.elec.set_geom_(geom)
+                #mol.nuc.set_geom_(geom)
+                self.mol = self.base.mol = mol
+                #print 'grad.py', self.mol.elec.atom_coords()
+                mf_scanner = self.base
+                e_tot = mf_scanner(mol)
+                de = self.kernel(**kwargs)
+                print 'e_tot', e_tot
+                print 'de', de
+                return e_tot, de
+
+        return SCF_GradScanner(self)
+
+# Inject to CDFT class
+CDFT.Gradients = lib.class_as_method(Gradients)

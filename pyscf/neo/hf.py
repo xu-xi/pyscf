@@ -30,14 +30,15 @@ class HF(SCF):
     def __init__(self, mol):
         SCF.__init__(self, mol)
 
+        self.mol = mol
         self.dm_elec = None
         self.dm_nuc = None
 
-        self.mf_elec = scf.RHF(mol.elec)
+        self.mf_elec = scf.RHF(self.mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
 
-        self.mf_nuc = scf.RHF(mol.nuc) #test
+        self.mf_nuc = scf.RHF(self.mol.nuc) #beta: for single proton
         self.mf_nuc.get_init_guess = self.get_init_guess_nuc
         self.mf_nuc.get_hcore = self.get_hcore_nuc
         self.mf_nuc.get_veff = self.get_veff_nuc_bare

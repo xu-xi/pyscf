@@ -99,7 +99,8 @@ def kernel(method, assert_convergence=ASSERT_CONV,
         opt.kernel()
     '''
     t0 = time.clock(), time.time()
-    mol = method.mol.copy()
+    #mol = method.mol.copy()
+    mol = method.mol #beta
     if 'log' in kwargs:
         log = lib.logger.new_logger(method, kwargs['log'])
     elif 'verbose' in kwargs:
