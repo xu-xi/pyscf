@@ -124,18 +124,16 @@ class CDFT(KS):
                 gamma = numpy.abs(gamma)/(numpy.linalg.norm(first_order_set[cycle-2] - first_order_set[cycle-3])**2)
             #second_order = self.L_second_order()
             #self.f -= 0.5*numpy.dot(numpy.linalg.inv(second_order), first_order)
-            print 'gamma:', gamma
+            logger.info(self, 'gamma: %s', gamma)
             f += gamma*first_order 
             E_tot = self.scf()
             coeff = self.mf_nuc.mo_coeff
             first_order = numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mol.nuc.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mol.nuclei_expect_position
-            print '1st:', first_order 
-            print 'f_set', f_set
-            print 'first_order_set', first_order_set
+            logger.info(self, '1st de:%s', first_order)
 
         else:
-            print 'Norm of 1st de:', numpy.linalg.norm(first_order)
-            print 'f:', f
+            logger.info(self, 'Norm of 1st de: %s', numpy.linalg.norm(first_order))
+            logger.info(self, 'f:', f)
             return E_tot 
 
     def optimal_f(self, mf, conv_tol = 1e-10, max_cycle = 50, method = 2):
@@ -152,20 +150,18 @@ class CDFT(KS):
                 self.f += gamma*first_order 
             elif method == 2:
                 second_order = self.L_second_order()
-                #print '2nd:', second_order
                 self.f -= 0.5*numpy.dot(numpy.linalg.inv(second_order), first_order) #test
             else:
                 raise ValueError('Unsupported method for optimization of f.')
 
             first_order = self.L_first_order(self.f)
-            print 'f:', self.f
-            print '1st:', first_order
+            logger.info(self, 'f:%s', self.f)
+            logger.info(self, '1st de: %s', first_order)
             if cycle >= max_cycle:
-                print 'Error: NOT convergent for the optimation of f.'
-                sys.exit(1)
+                raise RuntimeError('NOT convergent for the optimation of f.')
         else:
-            print 'Norm of 1st de:', numpy.linalg.norm(first_order)
-            print 'f:', self.f
+            logger(self, 'Norm of 1st de: %s', numpy.linalg.norm(first_order))
+            logger(self, 'f: %s', self.f)
             return self.f
 
 
