@@ -171,7 +171,6 @@ class CDFT(KS):
         #self.dm_elec = None
         #self.dm_nuc = None
 
-        '''
         self.mf_elec = dft.RKS(self.mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.xc = 'b3lyp'
@@ -183,7 +182,6 @@ class CDFT(KS):
         self.mf_nuc.get_hcore = self.get_hcore_nuc
         self.mf_nuc.get_veff = self.get_veff_nuc_bare
         self.mf_nuc.get_occ = self.get_occ_nuc
-        '''
 
         self.mf_elec.kernel()
         self.dm_elec = self.mf_elec.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)

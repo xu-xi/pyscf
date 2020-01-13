@@ -5,3 +5,4 @@ from pyscf.neo.hf import *
 from pyscf.neo.rks import *
 from pyscf.neo.cdft import *
 from pyscf.neo.grad import *
+#from pyscf.neo.ase import *
