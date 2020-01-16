@@ -35,6 +35,7 @@ class Gradients(lib.StreamObject):
         self.verbose = 4
         atmlst = self.mol.quantum_nuc
         self.atmlst = [i for i in range(len(atmlst)) if atmlst[i] == False] # a list for classical nuclei
+        self.grad = self.kernel
 
     #as_scanner = grad.rhf.as_scanner
 
