@@ -280,7 +280,7 @@ def make_ext(pkg_name, relpath, srcs, libraries=[], library_dirs=default_lib_dir
             soname = pkg_name.split('.')[-1]
             extra_link_flags = extra_link_flags + ['-install_name', '@loader_path/'+soname+so_ext]
             runtime_library_dirs = []
-        if sys.platform.startswith('aix') or sys.platform.startswith('os400'):
+        elif sys.platform.startswith('aix') or sys.platform.startswith('os400'):
             extra_compile_flags = extra_compile_flags + ['-fopenmp']
             extra_link_flags = extra_link_flags + ['-lblas', '-lgomp', '-Wl,-brtl']
             runtime_library_dirs = ['$ORIGIN', '.']
@@ -367,7 +367,7 @@ extensions += [
     make_ext('pyscf.lib.libcvhf', 'vhf',
              '''fill_nr_s8.c nr_incore.c nr_direct.c optimizer.c nr_direct_dot.c
              time_rev.c r_direct_o1.c rkb_screen.c r_direct_dot.c
-             rah_direct_dot.c rha_direct_dot.c''',
+             rah_direct_dot.c rha_direct_dot.c hessian_screen.c''',
              ['cgto', 'np_helper', 'cint']),
     make_ext('pyscf.lib.libao2mo', 'ao2mo',
              'restore_eri.c nr_ao2mo.c nr_incore.c r_ao2mo.c',

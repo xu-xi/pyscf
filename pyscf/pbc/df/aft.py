@@ -52,25 +52,44 @@ def estimate_eta(cell, cutoff=CUTOFF):
     return eta
 
 def estimate_eta_for_ke_cutoff(cell, ke_cutoff, precision=PRECISION):
-    '''Given ke_cutoff, the upper limit of eta to guarantee the required
-    precision in Coulomb integrals.
+    '''Given ke_cutoff, the upper bound of eta to produce the required
+    precision in AFTDF Coulomb integrals.
     '''
+    # search eta for interaction between GTO(eta) and point charge at the same
+    # location so that
+    # \sum_{k^2/2 > ke_cutoff} weight*4*pi/k^2 GTO(eta, k) < precision
+    # GTO(eta, k) = Fourier transform of Gaussian e^{-eta r^2}
+
     lmax = numpy.max(cell._bas[:,gto.ANG_OF])
     kmax = (ke_cutoff*2)**.5
-    log_rest = numpy.log(precision / (32*numpy.pi**2 * kmax**(lmax*2-1)))
+    # The interaction between two s-type density distributions should be
+    # enough for the error estimation.  Put lmax here to increate Ecut for
+    # slightly better accuracy
+    log_rest = numpy.log(precision / (32*numpy.pi**2 * kmax**(lmax-1)))
     log_eta = -1
     eta = kmax**2/4 / (-log_eta - log_rest)
     return eta
 
 def estimate_ke_cutoff_for_eta(cell, eta, precision=PRECISION):
-    '''Given eta, the lower limit of ke_cutoff to guarantee the required
-    precision in Coulomb integrals.
+    '''Given eta, the lower bound of ke_cutoff to produce the required
+    precision in AFTDF Coulomb integrals.
     '''
+    # estimate ke_cutoff for interaction between GTO(eta) and point charge at
+    # the same location so that
+    # \sum_{k^2/2 > ke_cutoff} weight*4*pi/k^2 GTO(eta, k) < precision
+    # \sum_{k^2/2 > ke_cutoff} weight*4*pi/k^2 GTO(eta, k)
+    # ~ \int_kmax^infty 4*pi/k^2 GTO(eta,k) dk^3
+    # = (4*pi)^2 *2*eta/kmax^{n-1} e^{-kmax^2/4eta} + ... < precision
+
+    # The magic number 0.2 comes from AFTDF.__init__ and GDF.__init__
     eta = max(eta, 0.2)
-    lmax = numpy.max(cell._bas[:,gto.ANG_OF])
-    log_k0 = 5 + numpy.log(eta) / 2
+    log_k0 = 3 + numpy.log(eta) / 2
     log_rest = numpy.log(precision / (32*numpy.pi**2*eta))
-    Ecut = 2*eta * (log_k0*(lmax*2-1) - log_rest)
+    # The interaction between two s-type density distributions should be
+    # enough for the error estimation.  Put lmax here to increate Ecut for
+    # slightly better accuracy
+    lmax = numpy.max(cell._bas[:,gto.ANG_OF])
+    Ecut = 2*eta * (log_k0*(lmax-1) - log_rest)
     Ecut = max(Ecut, .5)
     return Ecut
 
@@ -266,6 +285,7 @@ class AFTDF(lib.StreamObject):
 
         # The following attributes are not input options.
         self.exxdiv = None  # to mimic KRHF/KUHF object in function get_coulG
+        self._rsh_df = {}  # Range separated Coulomb DF objects
         self._keys = set(self.__dict__.keys())
 
     def dump_flags(self, verbose=None):
@@ -275,6 +295,12 @@ class AFTDF(lib.StreamObject):
         logger.info(self, 'eta = %s', self.eta)
         logger.info(self, 'len(kpts) = %d', len(self.kpts))
         logger.debug1(self, '    kpts = %s', self.kpts)
+        return self
+
+    def reset(self, cell=None):
+        if cell is not None:
+            self.cell = cell
+        self._rsh_df = {}
         return self
 
     def check_sanity(self):
@@ -316,7 +342,7 @@ class AFTDF(lib.StreamObject):
                             'Coulomb integral error is ~ %.2g Eh.\n'
                             'Recommended mesh is %s.',
                             self.mesh, cell.precision, cell.dimension, err, mesh_guess)
-            if (cell.mesh[cell.dimension:]/(1.*meshz) > 1.1).any():
+            if any(x/meshz > 1.1 for x in cell.mesh[cell.dimension:]):
                 meshz = pbcgto.cell._mesh_inf_vaccum(cell)
                 logger.warn(self, 'setting mesh %s of AFTDF too high in non-periodic direction '
                             '(=%s) can result in an unnecessarily slow calculation.\n'
@@ -446,13 +472,18 @@ class AFTDF(lib.StreamObject):
     # core DM in CASCI). An SCF level exxdiv treatment is inadequate for
     # post-HF methods.
     def get_jk(self, dm, hermi=1, kpts=None, kpts_band=None,
-               with_j=True, with_k=True, exxdiv=None):
+               with_j=True, with_k=True, omega=None, exxdiv=None):
+        if omega is not None:  # J/K for RSH functionals
+            return _sub_df_jk_(self, dm, hermi, kpts, kpts_band,
+                               with_j, with_k, omega, exxdiv)
+
         if kpts is None:
             if numpy.all(self.kpts == 0):
                 # Gamma-point calculation by default
                 kpts = numpy.zeros(3)
             else:
                 kpts = self.kpts
+        kpts = numpy.asarray(kpts)
 
         if kpts.shape == (3,):
             return aft_jk.get_jk(self, dm, hermi, kpts, kpts_band, with_j,
@@ -554,6 +585,19 @@ def _compensate_nuccell(mydf):
     nuccell._bas = numpy.asarray(chg_bas, dtype=numpy.int32)
     nuccell._env = numpy.hstack((cell._env, chg_env))
     return nuccell
+
+def _sub_df_jk_(dfobj, dm, hermi=1, kpts=None, kpts_band=None,
+                with_j=True, with_k=True, omega=None, exxdiv=None):
+    key = '%.6f' % omega
+    if key in dfobj._rsh_df:
+        rsh_df = dfobj._rsh_df[key]
+    else:
+        rsh_df = dfobj._rsh_df[key] = copy.copy(dfobj).reset()
+        logger.info(dfobj, 'Create RSH-%s object %s for omega=%s',
+                    dfobj.__class__.__name__, rsh_df, omega)
+    with rsh_df.cell.with_range_coulomb(omega):
+        return rsh_df.get_jk(dm, hermi, kpts, kpts_band, with_j, with_k,
+                             omega=None, exxdiv=exxdiv)
 
 del(CUTOFF, PRECISION)
 

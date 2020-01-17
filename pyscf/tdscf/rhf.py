@@ -18,6 +18,7 @@
 # Ref:
 # Chem Phys Lett, 256, 454
 # J. Mol. Struct. THEOCHEM, 914, 3
+# Recent Advances in Density Functional Methods, Chapter 5, M. E. Casida
 #
 
 import time
@@ -365,7 +366,7 @@ def analyze(tdobj, verbose=None):
 
     if mol.symmetry:
         orbsym = hf_symm.get_orbsym(mol, mo_coeff) % 10
-        x_sym = (orbsym[mo_occ==0,None] ^ orbsym[mo_occ==2]).ravel()
+        x_sym = (orbsym[mo_occ==2,None] ^ orbsym[mo_occ==0]).ravel()
     else:
         x_sym = None
 
@@ -397,7 +398,7 @@ def analyze(tdobj, verbose=None):
                      i+1, dip[0], dip[1], dip[2], numpy.dot(dip, dip),
                      f_oscillator[i])
 
-        log.info('\n** Transition velocity dipole moments (imaginary part AU) **')
+        log.info('\n** Transition velocity dipole moments (imaginary part, AU) **')
         log.info('state          X           Y           Z        Dip. S.      Osc.')
         trans_v = tdobj.transition_velocity_dipole()
         f_v = tdobj.oscillator_strength(gauge='velocity', order=0)
@@ -406,7 +407,7 @@ def analyze(tdobj, verbose=None):
             log.info('%3d    %11.4f %11.4f %11.4f %11.4f %11.4f',
                      i+1, v[0], v[1], v[2], numpy.dot(v, v), f_v[i])
 
-        log.info('\n** Transition magnetic dipole moments (AU) **')
+        log.info('\n** Transition magnetic dipole moments (imaginary part, AU) **')
         log.info('state          X           Y           Z')
         trans_m = tdobj.transition_magnetic_dipole()
         for i, ei in enumerate(tdobj.e):
