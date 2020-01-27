@@ -3,6 +3,7 @@ Interface for PySCF and ASE
 '''
 
 from ase.calculators.calculator import Calculator
+from ase.units import Bohr, Hartree
 from pyscf import neo
 from pyscf import dft
 
@@ -30,7 +31,7 @@ class Pyscf(Calculator):
         mol.set_quantum_nuclei(self.parameters.quantum_nuc)
         mf = neo.CDFT(mol)
         mf.mf_elec.xc = self.parameters.xc
-        self.results['energy'] = mf.scf()
+        self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
-        self.results['forces'] = -g.grad()
+        self.results['forces'] = -g.grad()*Hartree/Bohr
 

@@ -165,7 +165,7 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-8, max_cycle = 100, **kwargs):
+    def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei; Only works for single proton now'
 
         #self.dm_elec = None
