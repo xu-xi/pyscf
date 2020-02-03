@@ -31,7 +31,7 @@ class Mole(gto.mole.Mole):
             if self.quantum_nuc[i] == True:
                 quantum_nuclear_charge -= eole._atm[i,0]
                 eole._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
-        eole.charge += quantum_nuclear_charge
+        eole.charge += quantum_nuclear_charge # charge determines the number of electrons
         return eole
 
     def nuc_mole(self, atom_index, basis='etbs'):
@@ -39,18 +39,22 @@ class Mole(gto.mole.Mole):
         nole = gto.mole.copy(self) # a Mole object for quantum nuclei
         nole.atom_index = atom_index
 
-        alpha = 2*math.sqrt(2)
-        beta = math.sqrt(2)
+        alpha = 2*math.sqrt(2)*self.atom_mass_list()[atom_index]
+        beta = math.sqrt(2) 
 
+        # even-tempered basis 8s8p8d
         if basis == 'etbs':
-            basis = gto.expand_etbs([(0, 8, alpha, beta), (1, 8, alpha, beta), (2, 8, alpha, beta)]) # even-tempered basis 8s8p8d
+            basis = gto.expand_etbs([(0, 8, alpha, beta), (1, 8, alpha, beta), (2, 8, alpha, beta)]) 
         nole._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
         nole._atm, nole._bas, nole._env = gto.mole.make_env(nole._atom, nole._basis, self._env[:gto.PTR_ENV_START])
-        for i in range(self.elec.natm):
+        quantum_nuclear_charge = 0
+        for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
+                quantum_nuclear_charge -= nole._atm[i,0]
                 nole._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
-        #self.nuc.charge += int(self.nuc_num)
+        nole.charge += quantum_nuclear_charge
+        #nole.nelectron = 1
         #self.nuc.nelectron = self.nuc_num
         #self.nuc.spin = self.nuc_num
         return nole
@@ -71,20 +75,11 @@ class Mole(gto.mole.Mole):
         else:
             raise NotImplementedError('Unsupported parameter %s' %(alist))
 
-        self.nuc_num = len([i for i in self.quantum_nuc if i == True]) # the number of quantum nuclei
+        self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
+        logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
         self.elec = self.elec_mole()
         self.nuc = []
         for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
                 self.nuc.append(self.nuc_mole(i))
-
-    def set_nuclei_expect_position(self, position=None, unit='B'):
-        'set an expectation value of the position operator for quantum nuclei(only support single proton now)'        
-        if position == None:
-            position = self.mol.atom_coord(0) #beta
-        if unit == 'A':
-            self.nuclei_expect_position = position*1.88973
-        elif unit == 'B':
-            self.nuclei_expect_position = position
-
 
