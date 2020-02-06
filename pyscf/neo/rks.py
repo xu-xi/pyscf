@@ -25,4 +25,5 @@ class KS(HF):
         self.mf_elec = dft.RKS(mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
+        self.mf_elec.xc = 'b3lyp'
 

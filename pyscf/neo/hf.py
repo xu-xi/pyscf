@@ -33,6 +33,11 @@ class HF(SCF):
         self.dm_nuc = [None]*self.mol.nuc_num
         self.verbose = 5
 
+        # set up the Hamiltonian for electrons
+        self.mf_elec = scf.RHF(self.mol.elec)
+        self.mf_elec.init_guess = 'atom'
+        self.mf_elec.get_hcore = self.get_hcore_elec
+
     def get_hcore_nuc(self, mole):
         'get the core Hamiltonian for quantum nucleus.'
 
@@ -133,14 +138,14 @@ class HF(SCF):
         return E*.5 
 
 
-    def energy_tot(self, mf_elec, mf_nuc):
+    def energy_tot_old(self, mf_elec, mf_nuc):
         'Total energy of NEO'
         mol = self.mol
         
-        dm_elec = scf.hf.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
+        dm_elec = mf_elec.make_rdm1()
         dm_nuc = [None]*self.mol.nuc_num
         for i in range(len(mf_nuc)):
-            dm_nuc[i] = scf.hf.make_rdm1(mf_nuc[i].mo_coeff, mf_nuc[i].mo_occ)
+            dm_nuc[i] = mf_nuc[i].make_rdm1()
 
         E_tot = 0
         for i in range(len(mf_nuc)):
@@ -153,13 +158,40 @@ class HF(SCF):
 
         return E_tot
 
+    def energy_tot(self, mf_elec, mf_nuc):
+        'Total energy of NEO'
+        mol = self.mol
+        E_tot = 0
+
+        self.dm_elec = mf_elec.make_rdm1()
+        for i in range(len(mf_nuc)):
+            self.dm_nuc[i] = mf_nuc[i].make_rdm1()
+
+        h1e = mf_elec.get_hcore(mf_elec.mol)
+        e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
+        logger.debug(self, 'Energy of e1: %s', e1)
+
+        vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
+        e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
+        logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
+
+        E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
+
+        for i in range(len(mf_nuc)):
+            index = mf_nuc[i].mol.atom_index
+            h1n = mf_nuc[i].get_hcore(mf_nuc[i].mol)
+            n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
+            logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(index), n1)
+            E_tot += n1
+
+        E_tot =  E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + mf_elec.energy_nuc() # substract repeatedly counted terms
+
+        return E_tot
+
+
     def scf(self, conv_tol = 1e-7, max_cycle = 60, dm0_elec = None, dm0_nuc = None):
         'self-consistent field driver for NEO'
 
-        # set up the Hamiltonian for electrons
-        self.mf_elec = scf.RHF(self.mol.elec)
-        self.mf_elec.init_guess = 'atom'
-        self.mf_elec.get_hcore = self.get_hcore_elec
         self.dm_elec = self.mf_elec.init_guess_by_atom()
 
         # set up the Hamiltonian for each quantum nucleus
@@ -173,17 +205,19 @@ class HF(SCF):
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
         self.mf_elec.kernel(dump_chk=False)
+        self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
             self.mf_nuc[i].kernel(dump_chk=False)
+            self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         # update density matrix for electrons and quantum nuclei
-        self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
-        for i in range(len(self.mf_nuc)):
-            self.dm_nuc[i] = scf.hf.make_rdm1(self.mf_nuc[i].mo_coeff, self.mf_nuc[i].mo_occ)
+        #self.dm_elec = self.mf_elec.make_rdm1()
+        #for i in range(len(self.mf_nuc)):
+        #    self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-        logger.info(self, 'Initial total Energy of NEO: %.15g' %(E_tot))
+        logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
 
         scf_conv = False
         cycle = 0
@@ -194,15 +228,16 @@ class HF(SCF):
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            #self.dm_nuc = scf.hf.make_rdm1(self.mf_nuc.mo_coeff, self.mf_nuc.mo_occ)
             self.mf_elec.kernel(dump_chk=False)
+            self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
                 self.mf_nuc[i].kernel(dump_chk=False)
+                self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             # update density matrix for electrons and quantum nuclei
-            self.dm_elec = scf.hf.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
-            for i in range(len(self.mf_nuc)):
-                self.dm_nuc[i] = scf.hf.make_rdm1(self.mf_nuc[i].mo_coeff, self.mf_nuc[i].mo_occ)
+            #self.dm_elec = self.mf_elec.make_rdm1()
+            #for i in range(len(self.mf_nuc)):
+            #    self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             logger.info(self, 'Cycle %i Total Energy of NEO: %s\n' %(cycle, E_tot))
@@ -213,6 +248,7 @@ class HF(SCF):
                 kinetic_energy = 0
                 for i in range(len(self.mf_nuc)):
                     logger.debug(self, 'The eigenvalues of the quantum nucleus:\n%s', self.mf_nuc[i].mo_energy)
+                    logger.debug(self, 'The coefficents of the quantum nucleus:\n%s', self.mf_nuc[i].mo_coeff)
                     k = numpy.einsum('ij,ji', self.mol.nuc[i].intor_symmetric('int1e_kin')/(1836.15267343 * self.mol.atom_mass_list()[self.mol.nuc[i].atom_index]), self.dm_nuc[i])
                     kinetic_energy += k
                     x = numpy.einsum('xij,ji->x', self.mol.nuc[i].intor_symmetric('int1e_r', comp=3), self.dm_nuc[i])

@@ -14,8 +14,6 @@ class Mole(gto.mole.Mole):
     >>> from pyscf import neo
     >>> mol = neo.Mole()
     >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', basis = 'ccpvdz')
-    >>> mol.set_quantum_nuclei() # all atoms are treated quantum mechanically
-    >>> mol.set_quantum_nuclei([0, 1]) # H and C are treated quantum mechanically
 
     '''
 
@@ -34,17 +32,23 @@ class Mole(gto.mole.Mole):
         eole.charge += quantum_nuclear_charge # charge determines the number of electrons
         return eole
 
-    def nuc_mole(self, atom_index, basis='etbs'):
+    def nuc_mole(self, atom_index, n, beta):
         'return a Mole object for specified quantum nuclei, the default basis is even-tempered Gaussian basis'
         nole = gto.mole.copy(self) # a Mole object for quantum nuclei
         nole.atom_index = atom_index
 
         alpha = 2*math.sqrt(2)*self.atom_mass_list()[atom_index]
-        beta = math.sqrt(2) 
+        
+        if self.atom_symbol(atom_index) == 'H':
+            beta = math.sqrt(2)
+            n = 8
+        else:
+            #alpha = math.sqrt(2)
+            beta = math.sqrt(5)
+            n = 12
 
         # even-tempered basis 8s8p8d
-        if basis == 'etbs':
-            basis = gto.expand_etbs([(0, 8, alpha, beta), (1, 8, alpha, beta), (2, 8, alpha, beta)]) 
+        basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
         nole._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
         nole._atm, nole._bas, nole._env = gto.mole.make_env(nole._atom, nole._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0
@@ -59,7 +63,7 @@ class Mole(gto.mole.Mole):
         #self.nuc.spin = self.nuc_num
         return nole
 
-    def build(self, alist = 'all', **kwargs):
+    def build(self, alist = 'all', n = 8, beta = math.sqrt(2), **kwargs):
         'assign which nuclei are treated quantum mechanically by a list(alist)'
         gto.mole.Mole.build(self, **kwargs)
 
@@ -73,7 +77,7 @@ class Mole(gto.mole.Mole):
                 self.quantum_nuc[i] = True
                 logger.note(self, 'The %s(%i) atom is treated quantum-mechanically' %(self.atom_symbol(i), i))
         else:
-            raise NotImplementedError('Unsupported parameter %s' %(alist))
+            raise TypeError('Unsupported parameter %s' %(alist))
 
         self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
         logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
@@ -81,5 +85,5 @@ class Mole(gto.mole.Mole):
         self.nuc = []
         for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
-                self.nuc.append(self.nuc_mole(i))
+                self.nuc.append(self.nuc_mole(i, n, beta))
 

@@ -7,19 +7,6 @@ from pyscf import dft
 from pyscf.neo.rks import KS
 from pyscf.lib import logger
 
-def L_first_order(mf, f):
-    'The first order derivative of L w.r.t the Lagrange multiplier f'
-    mf.f = f
-    dm = scf.hf.make_rdm1(mf.coeff, mf.occ)
-    fock = mf.get_fock(dm = dm)
-    s1n = mf.get_ovlp()
-    energy, coeff = mf.eig(fock, s1n)
-    occ = mf.get_occ(energy, coeff)
-    dm = scf.hf.make_rdm1(coeff, occ)
-    first_order = numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mf.mol.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mf.nuclei_expect_position
-
-    return first_order
-
 class CDFT(KS):
     '''
     Example:
@@ -73,7 +60,7 @@ class CDFT(KS):
         i = mf.mol.atom_index
         self.f[i] = f
         #fock = mf.get_fock(dm = self.dm_nuc)
-        h1n = mf.get_hcore(mol=mf.mol)
+        h1n = mf.get_hcore(mol = mf.mol)
         s1n = mf.get_ovlp()
         energy, coeff = mf.eig(h1n, s1n)
         occ = mf.get_occ(energy, coeff)
@@ -99,25 +86,32 @@ class CDFT(KS):
     def energy_tot(self, mf_elec, mf_nuc):
         'Total energy for cNEO'
         mol = self.mol
-
-        dm_elec = mf_elec.make_rdm1(mf_elec.mo_coeff, mf_elec.mo_occ)
-        dm_nuc = [None] * self.mol.nuc_num
-        for i in range(len(dm_nuc)):
-            dm_nuc[i] = scf.hf.make_rdm1(mf_nuc[i].mo_coeff, mf_nuc[i].mo_occ)
-
         E_tot = 0 
-        for i in range(len(mf_nuc)):
-            E_tot += mf_nuc[i].e_tot
-        logger.debug(self, 'Energy of quantum nuclei: %s', E_tot)
-        logger.debug(self, 'Energy of electrons: %s',  mf_elec.e_tot)
-        logger.debug(self, 'Energy of classcial nuclei: %s', mf_elec.energy_nuc())
 
-        E_tot += mf_elec.e_tot - self.elec_nuc_coulomb(dm_elec, dm_nuc) - self.nuc_nuc_coulomb(dm_nuc) - self.mol.nuc_num * mf_elec.energy_nuc() # substract repeatedly counted terms
+        self.dm_elec = mf_elec.make_rdm1()
+        for i in range(len(mf_nuc)):
+            self.dm_nuc[i] = mf_nuc[i].make_rdm1()
+
+        h1e = mf_elec.get_hcore(mf_elec.mol)
+        e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
+        logger.debug(self, 'Energy of e1: %s', e1)
+
+        vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
+        e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
+        logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
+
+        E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
 
         for i in range(len(mf_nuc)):
             index = mf_nuc[i].mol.atom_index
+            h1n = mf_nuc[i].get_hcore(mf_nuc[i].mol)
+            n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
+            logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(index), n1)
+            E_tot += n1
             h_r = numpy.einsum('xij,x->ij', mf_nuc[i].mol.intor_symmetric('int1e_r', comp=3), self.f[index])
-            E_tot -= numpy.einsum('ij,ji', h_r, dm_nuc[i])
+            E_tot -= numpy.einsum('ij,ji', h_r, self.dm_nuc[i])
+
+        E_tot = E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + mf_elec.energy_nuc() # substract repeatedly counted terms
 
         return E_tot
 
@@ -194,17 +188,15 @@ class CDFT(KS):
     def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
 
-        #self.dm_elec = None
-        #self.dm_nuc = None
-
         # set up the Hamiltonian for electrons in cNEO
         self.mf_elec = dft.RKS(self.mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.xc = self.xc # beta 
         self.mf_elec.get_hcore = self.get_hcore_elec
+        self.dm_elec = self.mf_elec.init_guess_by_atom()
 
         # set up the Hamiltonian for each quantum nuclei in cNEO
-        self.mf_nuc = []
+        self.mf_nuc = [] 
         for i in range(len(self.mol.nuc)):
             mf = scf.RHF(self.mol.nuc[i])
             mf.nuclei_expect_position = mf.mol.atom_coord(mf.mol.atom_index)
@@ -213,16 +205,17 @@ class CDFT(KS):
             mf.get_veff = self.get_veff_nuc_bare
             mf.get_occ = self.get_occ_nuc
             self.mf_nuc.append(mf)
+            self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
         self.mf_elec.kernel(dump_chk=False)
-        self.dm_elec = self.mf_elec.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
+        self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mol.nuc)):
             self.mf_nuc[i].kernel(dump_chk=None)
-            self.dm_nuc[i] = self.mf_nuc[i].make_rdm1(self.mf_nuc[i].mo_coeff, self.mf_nuc[i].mo_occ)
+            self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
-        logger.info(self, 'Initial total Energy of NEO: %.15g' %(E_tot))
+        logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
 
         self.converged = False
         cycle = 0
@@ -232,7 +225,7 @@ class CDFT(KS):
             E_last = E_tot
 
             self.mf_elec.kernel(dump_chk=None)
-            self.dm_elec = self.mf_elec.make_rdm1(self.mf_elec.mo_coeff, self.mf_elec.mo_occ)
+            self.dm_elec = self.mf_elec.make_rdm1()
 
             #if cycle >= 1: # using pre-converged density can be more stable
             for i in range(len(self.mf_nuc)):
@@ -244,7 +237,7 @@ class CDFT(KS):
                 logger.info(self, 'f of %s(%i) atom: %s' %(self.mol.atom_symbol(index), index, self.f[index]))
                 logger.info(self, '1st de of L: %s', opt.fun)
                 self.mf_nuc[i].kernel(dump_chk=None)
-                self.dm_nuc[i] = scf.hf.make_rdm1(self.mf_nuc[i].mo_coeff, self.mf_nuc[i].mo_occ)
+                self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             logger.info(self, 'Cycle %i Total energy of cNEO: %.15g\n' %(cycle, E_tot))

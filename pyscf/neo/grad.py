@@ -44,10 +44,11 @@ class Gradients(lib.StreamObject):
         g.verbose = 2
         return g.grad(atmlst = atmlst)
 
-    def get_hcore(self):
-        mass_proton = 1836.15267343
-        h = self.mol.nuc.intor('int1e_ipkin', comp=3)/mass_proton
-        h -= self.mol.nuc.intor('int1e_ipnuc', comp=3)
+    def get_hcore(self, mol):
+        i = mol.atom_index
+        mass = 1836.15267343 * self.mol.atom_mass_list()[i]
+        h = mol.intor('int1e_ipkin', comp=3)/mass
+        h -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
         return h
 
     def hcore_deriv(self, atm_id): #beta
