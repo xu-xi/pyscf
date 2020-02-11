@@ -45,42 +45,56 @@ class Gradients(lib.StreamObject):
         return g.grad(atmlst = atmlst)
 
     def get_hcore(self, mol):
+        'part of the gradients of core Hamiltonian of quantum nucleus'
         i = mol.atom_index
         mass = 1836.15267343 * self.mol.atom_mass_list()[i]
         h = mol.intor('int1e_ipkin', comp=3)/mass
         h -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
         return h
 
-    def hcore_deriv(self, atm_id): #beta
-        mol = self.mol.nuc
+    def hcore_deriv(self, atm_id, mol): #beta
         with mol.with_rinv_as_nucleus(atm_id):
             vrinv = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
             vrinv *= -mol.atom_charge(atm_id)
 
         return vrinv + vrinv.transpose(0,2,1)
 
-    def grad_jcross_elec(self):
-        'get the gradient for the cross term of Coulomb interactions between electrons and quantum nuclei'
-        jcross = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc, self.mol.nuc), self.scf.dm_nuc, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)
+    def grad_jcross_elec_nuc(self):
+        'get the gradient for the cross term of Coulomb interactions between electrons and quantum nuclus'
+        jcross = 0
+        for i in range(len(self.mol.nuc)):
+            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
         return jcross
 
-    def grad_jcross_nuc(self):
-        'get the gradient for the cross term of Coulomb interactions between electrons and quantum nuclei'
-        jcross = scf.jk.get_jk((self.mol.nuc, self.mol.nuc, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)
+    def grad_jcross_nuc_elec(self, mol):
+        'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
+        i = mol.atom_index
+        jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
         return jcross
 
-    def get_ovlp(self):
-        return self.mol.nuc.intor('int1e_ipovlp', comp=3)
+    def grad_jcross_nuc_nuc(self, mol):
+        'get the gradient for the cross term of Coulomb interactions between quantum nuclei'
+        i = mol.atom_index
+        jcross = numpy.zeros((3, mol.nao_nr(), mol.nao_nr()))
+        for j in range(len(self.mol.nuc)):
+            k = self.mol.nuc[j].atom_index
+            if k != i:
+                jcross += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
+        return jcross
 
-    def make_rdm1e(self):
-        mo_energy = self.scf.mf_nuc.mo_energy
-        mo_coeff = self.scf.mf_nuc.mo_coeff
-        mo_occ = self.scf.mf_nuc.get_occ(mo_energy, mo_coeff)
+    def get_ovlp(self, mol):
+        return mol.intor('int1e_ipovlp', comp=3)
+
+    def make_rdm1e(self, mf_nuc):
+        mo_energy = mf_nuc.mo_energy
+        mo_coeff = mf_nuc.mo_coeff
+        mo_occ = mf_nuc.get_occ(mo_energy, mo_coeff)
         mo0 = mo_coeff[:,mo_occ>0]
         mo0e = mo0 * (mo_energy[mo_occ>0] * mo_occ[mo_occ>0])
         return numpy.dot(mo0e, mo0.T.conj())
 
     def get_veff(self):
+        'not used'
         vj, vk = scf.jk.get_jk(self.mol.nuc, (self.scf.dm_nuc, self.scf.dm_nuc), ('ijkl,ji->kl','ijkl,li->kj'), intor='int2e_ip1_sph', comp=3)
         return vj - vk
 
@@ -93,21 +107,27 @@ class Gradients(lib.StreamObject):
         aoslices = self.mol.aoslice_by_atom()
 
         for k, ia in enumerate(atmlst):
-            p0, p1 = aoslices[ia,2:]
-            h1ao = self.hcore_deriv(ia)
-            self.de[k] += numpy.einsum('xij,ij->x', h1ao, self.scf.dm_nuc)
-            self.de[k] += numpy.einsum('xij,ij->x', self.get_hcore(), self.scf.dm_nuc)*2
-            self.de[k] += numpy.einsum('xij,ij->x', self.get_veff(), self.scf.dm_nuc)*2
-            self.de[k] -= numpy.einsum('xij,ij->x', self.get_ovlp(), self.make_rdm1e())*2
-            f_deriv = numpy.einsum('ijk,jk->i', self.mol.nuc.intor('int1e_irp'), self.scf.dm_nuc)*2
-            self.de[k] += numpy.dot(f_deriv.reshape(3,3), self.scf.f)
-            jcross1 = self.grad_jcross_nuc()
-            jcross2 = self.grad_jcross_elec()
-            self.de[k] -= numpy.einsum('xij,ij->x', jcross1, self.scf.dm_nuc)*2
-            self.de[k] -= numpy.einsum('xij,ij->x', jcross2[:,p0:p1], self.scf.dm_elec[p0:p1])*2
-
+            p0, p1 = aoslices[ia, 2:]
             if self.mol.quantum_nuc[ia] == True:
-                self.de[k] += self.scf.f
+                for i in range(len(self.mol.nuc)):
+                    if self.mol.nuc[i].atom_index == ia:
+                        self.de[k] += numpy.einsum('xij,ij->x', self.get_hcore(self.mol.nuc[i]), self.scf.dm_nuc[i])*2
+                        self.de[k] -= numpy.einsum('xij,ij->x', self.get_ovlp(self.mol.nuc[i]), self.make_rdm1e(self.scf.mf_nuc[i]))*2
+                        self.de[k] += self.scf.f[ia]
+                        f_deriv = numpy.einsum('ijk,jk->i', self.mol.nuc[i].intor('int1e_irp'), self.scf.dm_nuc[i])*2
+                        self.de[k] += numpy.dot(f_deriv.reshape(3,3), self.scf.f[ia])
+                        jcross1 = self.grad_jcross_nuc_elec(self.mol.nuc[i])
+                        jcross2 = self.grad_jcross_elec_nuc()
+                        jcross3 = self.grad_jcross_nuc_nuc(self.mol.nuc[i])
+                        self.de[k] -= numpy.einsum('xij,ij->x', jcross1, self.scf.dm_nuc[i])*2
+                        self.de[k] -= numpy.einsum('xij,ij->x', jcross2[:,p0:p1], self.scf.dm_elec[p0:p1])*2
+                        self.de[k] += numpy.einsum('xij,ij->x', jcross3, self.scf.dm_nuc[i])*2
+            else:
+                for i in range(len(self.mol.nuc)):
+                    h1ao = self.hcore_deriv(ia, self.mol.nuc[i])
+                    self.de[k] += numpy.einsum('xij,ij->x', h1ao, self.scf.dm_nuc[i])
+                    jcross2 = self.grad_jcross_elec_nuc()
+                    self.de[k] -= numpy.einsum('xij,ij->x', jcross2[:,p0:p1], self.scf.dm_elec[p0:p1])*2
 
         grad_elec = self.grad_elec()
         self.de = grad_elec - self.de
