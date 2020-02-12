@@ -13,7 +13,8 @@ class Mole(gto.mole.Mole):
 
     >>> from pyscf import neo
     >>> mol = neo.Mole()
-    >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', basis = 'ccpvdz')
+    >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', quantum_nuc = [0,1], basis = 'ccpvdz')
+    # H and C would be treated quantum mechanically
 
     '''
 
@@ -63,21 +64,21 @@ class Mole(gto.mole.Mole):
         #self.nuc.spin = self.nuc_num
         return nole
 
-    def build(self, alist = 'all', n = 8, beta = math.sqrt(2), **kwargs):
-        'assign which nuclei are treated quantum mechanically by a list(alist)'
+    def build(self, quantum_nuc = 'all', n = 8, beta = math.sqrt(2), **kwargs):
+        'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
         gto.mole.Mole.build(self, **kwargs)
 
         self.quantum_nuc = [False]*self.natm
 
-        if alist == 'all':
+        if quantum_nuc == 'all':
             self.quantum_nuc = [True]*self.natm
             logger.note(self, 'All atoms are treated quantum-mechanically by default.')
-        elif isinstance(alist, list):
-            for i in alist:
+        elif isinstance(quantum_nuc, list):
+            for i in quantum_nuc:
                 self.quantum_nuc[i] = True
                 logger.note(self, 'The %s(%i) atom is treated quantum-mechanically' %(self.atom_symbol(i), i))
         else:
-            raise TypeError('Unsupported parameter %s' %(alist))
+            raise TypeError('Unsupported parameter %s' %(quantum_nuc))
 
         self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
         logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))

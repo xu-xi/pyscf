@@ -9,7 +9,7 @@ from pyscf import scf
 from pyscf import grad
 from pyscf import lib
 from pyscf.lib import logger
-from pyscf.neo import CDFT
+from pyscf.neo import Mole, CDFT
 from pyscf.grad.rhf import _write
 
 class Gradients(lib.StreamObject):
@@ -18,11 +18,9 @@ class Gradients(lib.StreamObject):
 
     >>> mol = neo.Mole()
     >>> mol.build(atom = 'H 0 0 0.00; C 0 0 1.064; N 0 0 2.220', basis = 'ccpvtz')
-    >>> mol.set_quantum_nuclei([0])
-    >>> mol.set_nuclei_expect_position(mol.atom_coord(0), unit='B')
     >>> mf = neo.CDFT(mol)
     >>> mf.mf_elec.xc = 'b3lyp'
-    >>> mf.inner_scf()
+    >>> mf.scf()
 
     >>> g = neo.Gradients(mf)
     >>> g.kernel()
@@ -50,12 +48,14 @@ class Gradients(lib.StreamObject):
         mass = 1836.15267343 * self.mol.atom_mass_list()[i]
         h = mol.intor('int1e_ipkin', comp=3)/mass
         h -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
-        return h
+        return -h # minus sign for the derivative is taken w.r.t 'r' instead of 'R'
 
-    def hcore_deriv(self, atm_id, mol): #beta
+    def hcore_deriv(self, atm_id, mol): 
+        'The change of Coulomb interactions between quantum and classical nuclei due to the change of the coordinates of classical nuclei'
+        i = mol.atom_index
         with mol.with_rinv_as_nucleus(atm_id):
             vrinv = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
-            vrinv *= -mol.atom_charge(atm_id)
+            vrinv *= (mol.atom_charge(atm_id)*self.mol._atm[i,0])
 
         return vrinv + vrinv.transpose(0,2,1)
 
@@ -63,14 +63,15 @@ class Gradients(lib.StreamObject):
         'get the gradient for the cross term of Coulomb interactions between electrons and quantum nuclus'
         jcross = 0
         for i in range(len(self.mol.nuc)):
-            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
-        return jcross
+            index = self.mol.nuc[i].atom_index
+            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[index,0]
+        return -jcross
 
     def grad_jcross_nuc_elec(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
         i = mol.atom_index
         jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
-        return jcross
+        return -jcross
 
     def grad_jcross_nuc_nuc(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nuclei'
@@ -80,10 +81,10 @@ class Gradients(lib.StreamObject):
             k = self.mol.nuc[j].atom_index
             if k != i:
                 jcross += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
-        return jcross
+        return -jcross
 
     def get_ovlp(self, mol):
-        return mol.intor('int1e_ipovlp', comp=3)
+        return -mol.intor('int1e_ipovlp', comp=3)
 
     def make_rdm1e(self, mf_nuc):
         mo_energy = mf_nuc.mo_energy
@@ -108,29 +109,28 @@ class Gradients(lib.StreamObject):
 
         for k, ia in enumerate(atmlst):
             p0, p1 = aoslices[ia, 2:]
+            jcross_elec_nuc = self.grad_jcross_elec_nuc()
+            # *2 for c.c.
+            self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[p0:p1])*2
             if self.mol.quantum_nuc[ia] == True:
                 for i in range(len(self.mol.nuc)):
                     if self.mol.nuc[i].atom_index == ia:
                         self.de[k] += numpy.einsum('xij,ij->x', self.get_hcore(self.mol.nuc[i]), self.scf.dm_nuc[i])*2
                         self.de[k] -= numpy.einsum('xij,ij->x', self.get_ovlp(self.mol.nuc[i]), self.make_rdm1e(self.scf.mf_nuc[i]))*2
-                        self.de[k] += self.scf.f[ia]
-                        f_deriv = numpy.einsum('ijk,jk->i', self.mol.nuc[i].intor('int1e_irp'), self.scf.dm_nuc[i])*2
+                        self.de[k] -= self.scf.f[ia]
+                        f_deriv = numpy.einsum('ijk,jk->i', -self.mol.nuc[i].intor('int1e_irp'), self.scf.dm_nuc[i])*2
                         self.de[k] += numpy.dot(f_deriv.reshape(3,3), self.scf.f[ia])
-                        jcross1 = self.grad_jcross_nuc_elec(self.mol.nuc[i])
-                        jcross2 = self.grad_jcross_elec_nuc()
-                        jcross3 = self.grad_jcross_nuc_nuc(self.mol.nuc[i])
-                        self.de[k] -= numpy.einsum('xij,ij->x', jcross1, self.scf.dm_nuc[i])*2
-                        self.de[k] -= numpy.einsum('xij,ij->x', jcross2[:,p0:p1], self.scf.dm_elec[p0:p1])*2
-                        self.de[k] += numpy.einsum('xij,ij->x', jcross3, self.scf.dm_nuc[i])*2
+                        jcross_nuc_elec = self.grad_jcross_nuc_elec(self.mol.nuc[i])
+                        self.de[k] -= numpy.einsum('xij,ij->x', jcross_nuc_elec, self.scf.dm_nuc[i])*2
+                        jcross_nuc_nuc = self.grad_jcross_nuc_nuc(self.mol.nuc[i])
+                        self.de[k] += numpy.einsum('xij,ij->x', jcross_nuc_nuc, self.scf.dm_nuc[i])*2
             else:
                 for i in range(len(self.mol.nuc)):
                     h1ao = self.hcore_deriv(ia, self.mol.nuc[i])
                     self.de[k] += numpy.einsum('xij,ij->x', h1ao, self.scf.dm_nuc[i])
-                    jcross2 = self.grad_jcross_elec_nuc()
-                    self.de[k] -= numpy.einsum('xij,ij->x', jcross2[:,p0:p1], self.scf.dm_elec[p0:p1])*2
 
         grad_elec = self.grad_elec()
-        self.de = grad_elec - self.de
+        self.de = grad_elec + self.de
         self._finalize()
         return self.de
     
@@ -151,12 +151,11 @@ class Gradients(lib.StreamObject):
             def __init__(self, g):
                 lib.GradScanner.__init__(self, g)
             def __call__(self, mol_or_geom, **kwargs):
-                if isinstance(mol_or_geom, gto.Mole):
+                if isinstance(mol_or_geom, Mole):
                     mol = mol_or_geom
                 else:
                     mol = self.mol.set_geom_(mol_or_geom, inplace=True)
 
-                mol.set_quantum_nuclei([0])
                 self.mol = self.base.mol = mol
                 mf_scanner = self.base
                 e_tot = mf_scanner(mol)

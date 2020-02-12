@@ -11,8 +11,10 @@ class Pyscf(Calculator):
 
     implemented_properties = ['energy', 'forces']
     default_parameters = {'basis': 'ccpvdz',
+                          'charge': 0,
                           'xc': 'b3lyp',
-                          'quantum_nuc': [0]}  
+                          'quantum_nuc': 'all'}  
+
 
     def __init__(self, **kwargs):
         Calculator.__init__(self, **kwargs)
@@ -25,12 +27,11 @@ class Pyscf(Calculator):
         positions = self.atoms.get_positions()
         mol.atom = []
         for i in range(len(atoms)):
-            mol.atom.append([atoms[i], tuple(positions[i])])
+            mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
         mol.basis = self.parameters.basis
-        mol.build()
-        mol.set_quantum_nuclei(self.parameters.quantum_nuc)
+        mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge)
         mf = neo.CDFT(mol)
-        mf.mf_elec.xc = self.parameters.xc
+        mf.xc = self.parameters.xc
         self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
         self.results['forces'] = -g.grad()*Hartree/Bohr
