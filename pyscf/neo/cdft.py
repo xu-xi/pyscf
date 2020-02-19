@@ -27,7 +27,7 @@ class CDFT(KS):
     def get_hcore_nuc(self, mol):
         'get the core Hamiltonian for quantum nucleus in cNEO'
         i = mol.atom_index
-        mass = 1836.15267343 * self.mol.atom_mass_list()[i] # the mass of quantum nucleus in a.u.
+        mass = 1836.15267343 * self.mol.mass[i] # the mass of quantum nucleus in a.u.
 
         h = mol.intor_symmetric('int1e_kin')/mass
         h -= mol.intor_symmetric('int1e_nuc')*self.mol._atm[i,0] # times nuclear charge

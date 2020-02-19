@@ -38,18 +38,23 @@ class Mole(gto.mole.Mole):
         nole = gto.mole.copy(self) # a Mole object for quantum nuclei
         nole.atom_index = atom_index
 
-        alpha = 2*math.sqrt(2)*self.atom_mass_list()[atom_index]
+        self.mass = self.atom_mass_list()
+        if self.atom_symbol(atom_index) == 'H@2':
+            self.mass[atom_index] = 2.01410177811
+
+        #alpha = 2*math.sqrt(2)*self.mass[atom_index]
+        alpha = 2*math.sqrt(2)
         
         if self.atom_symbol(atom_index) == 'H':
             beta = math.sqrt(2)
             n = 8
         else:
-            #alpha = math.sqrt(2)
-            beta = math.sqrt(5)
+            beta = math.sqrt(3)
             n = 12
 
-        # even-tempered basis 8s8p8d
+        # even-tempered basis 
         basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
+        logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
         nole._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
         nole._atm, nole._bas, nole._env = gto.mole.make_env(nole._atom, nole._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0

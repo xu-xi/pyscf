@@ -45,7 +45,7 @@ class Gradients(lib.StreamObject):
     def get_hcore(self, mol):
         'part of the gradients of core Hamiltonian of quantum nucleus'
         i = mol.atom_index
-        mass = 1836.15267343 * self.mol.atom_mass_list()[i]
+        mass = 1836.15267343 * self.mol.mass[i]
         h = mol.intor('int1e_ipkin', comp=3)/mass
         h -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
         return -h # minus sign for the derivative is taken w.r.t 'r' instead of 'R'

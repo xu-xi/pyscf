@@ -31,7 +31,7 @@ class HF(SCF):
         self.mol = mol
         self.dm_elec = None
         self.dm_nuc = [None]*self.mol.nuc_num
-        self.verbose = 5
+        self.verbose = 4
 
         # set up the Hamiltonian for electrons
         self.mf_elec = scf.RHF(self.mol.elec)
@@ -42,7 +42,7 @@ class HF(SCF):
         'get the core Hamiltonian for quantum nucleus.'
 
         i = mole.atom_index
-        mass = 1836.15267343 * self.mol.atom_mass_list()[i] # the mass of quantum nucleus in a.u.
+        mass = 1836.15267343 * self.mol.mass[i] # the mass of quantum nucleus in a.u.
 
         h = mole.intor_symmetric('int1e_kin')/mass
         h -= mole.intor_symmetric('int1e_nuc')*self.mol._atm[i,0] # times nuclear charge
@@ -249,7 +249,7 @@ class HF(SCF):
                 for i in range(len(self.mf_nuc)):
                     logger.debug(self, 'The eigenvalues of the quantum nucleus:\n%s', self.mf_nuc[i].mo_energy)
                     logger.debug(self, 'The coefficents of the quantum nucleus:\n%s', self.mf_nuc[i].mo_coeff)
-                    k = numpy.einsum('ij,ji', self.mol.nuc[i].intor_symmetric('int1e_kin')/(1836.15267343 * self.mol.atom_mass_list()[self.mol.nuc[i].atom_index]), self.dm_nuc[i])
+                    k = numpy.einsum('ij,ji', self.mol.nuc[i].intor_symmetric('int1e_kin')/(1836.15267343 * self.mol.mass[self.mol.nuc[i].atom_index]), self.dm_nuc[i])
                     kinetic_energy += k
                     x = numpy.einsum('xij,ji->x', self.mol.nuc[i].intor_symmetric('int1e_r', comp=3), self.dm_nuc[i])
                     logger.debug(self, 'Expectational position %s' %(x))
