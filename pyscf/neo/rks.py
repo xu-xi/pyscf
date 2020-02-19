@@ -19,10 +19,14 @@ class KS(HF):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol):
-        HF.__init__(self, mol)
+    def __init__(self, mol, restrict=True):
+        HF.__init__(self, mol, restrict)
+        
+        if self.restrict == True:
+            self.mf_elec = dft.RKS(mol.elec)
+        else:
+            self.mf_elec = dft.UKS(mol.elec)
 
-        self.mf_elec = dft.RKS(mol.elec)
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
         self.mf_elec.xc = 'b3lyp'

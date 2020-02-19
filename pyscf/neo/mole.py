@@ -42,8 +42,7 @@ class Mole(gto.mole.Mole):
         if self.atom_symbol(atom_index) == 'H@2':
             self.mass[atom_index] = 2.01410177811
 
-        #alpha = 2*math.sqrt(2)*self.mass[atom_index]
-        alpha = 2*math.sqrt(2)
+        alpha = 2*math.sqrt(2)*self.mass[atom_index]
         
         if self.atom_symbol(atom_index) == 'H':
             beta = math.sqrt(2)
@@ -64,6 +63,8 @@ class Mole(gto.mole.Mole):
                 nole._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
         nole.charge += quantum_nuclear_charge
+        nole.charge = 2
+        nole.spin = 0 
         #nole.nelectron = 1
         #self.nuc.nelectron = self.nuc_num
         #self.nuc.spin = self.nuc_num

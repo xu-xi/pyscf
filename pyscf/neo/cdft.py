@@ -17,11 +17,12 @@ class CDFT(KS):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol):
-        KS.__init__(self, mol)
+    def __init__(self, mol, restrict=True):
+        KS.__init__(self, mol, restrict)
         self.mol = mol
         self.scf = self.inner_scf
         self.xc = 'b3lyp'
+        self.mf_elec.xc = self.xc # beta 
         self.f = [numpy.zeros(3)] * self.mol.natm
 
     def get_hcore_nuc(self, mol):
@@ -34,7 +35,12 @@ class CDFT(KS):
 
         # Coulomb interactions between quantum nucleus and electrons
         if self.dm_elec is not None:
-            h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+            if self.restrict == True:
+                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+            else:
+                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
@@ -93,11 +99,19 @@ class CDFT(KS):
             self.dm_nuc[i] = mf_nuc[i].make_rdm1()
 
         h1e = mf_elec.get_hcore(mf_elec.mol)
-        e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
+        if self.restrict == True:
+            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
+        else:
+            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0]+self.dm_elec[1])
+
         logger.debug(self, 'Energy of e1: %s', e1)
 
         vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
-        e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
+        if self.restrict == True:
+            e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
+        else:
+            e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) + 
+                    numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5
         logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
 
         E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
@@ -187,13 +201,6 @@ class CDFT(KS):
 
     def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
-
-        # set up the Hamiltonian for electrons in cNEO
-        self.mf_elec = dft.RKS(self.mol.elec)
-        self.mf_elec.init_guess = 'atom'
-        self.mf_elec.xc = self.xc # beta 
-        self.mf_elec.get_hcore = self.get_hcore_elec
-        self.dm_elec = self.mf_elec.init_guess_by_atom()
 
         # set up the Hamiltonian for each quantum nuclei in cNEO
         self.mf_nuc = [] 

@@ -25,7 +25,7 @@ class HF(SCF):
     
     '''
 
-    def __init__(self, mol):
+    def __init__(self, mol, restrict = True):
         SCF.__init__(self, mol)
 
         self.mol = mol
@@ -34,7 +34,12 @@ class HF(SCF):
         self.verbose = 4
 
         # set up the Hamiltonian for electrons
-        self.mf_elec = scf.RHF(self.mol.elec)
+        self.restrict = restrict
+        if restrict == True:
+            self.mf_elec = scf.RHF(self.mol.elec)
+        else:
+            self.mf_elec = scf.UHF(self.mol.elec)
+
         self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
 
@@ -49,7 +54,11 @@ class HF(SCF):
 
         # Coulomb interactions between quantum nucleus and electrons
         if isinstance(self.dm_elec, numpy.ndarray):
-            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+            if self.restrict == False: # unrestricted case
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+            else:
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
@@ -119,8 +128,11 @@ class HF(SCF):
         mol = self.mol
         jcross = 0
         for i in range(len(dm_nuc)):
-            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', aosym = 's4') * mol._atm[mol.nuc[i].atom_index, 0] 
-        E = numpy.einsum('ij,ji', jcross, dm_elec)
+            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', aosym = 's4') * mol._atm[mol.nuc[i].atom_index, 0]
+        if self.restrict == False:
+            E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
+        else:
+            E = numpy.einsum('ij,ji', jcross, dm_elec)
         logger.debug(self, 'Energy of e-n Coulomb interactions: %s', E)
         return E
 
@@ -137,27 +149,6 @@ class HF(SCF):
         logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E*.5) # double counted
         return E*.5 
 
-
-    def energy_tot_old(self, mf_elec, mf_nuc):
-        'Total energy of NEO'
-        mol = self.mol
-        
-        dm_elec = mf_elec.make_rdm1()
-        dm_nuc = [None]*self.mol.nuc_num
-        for i in range(len(mf_nuc)):
-            dm_nuc[i] = mf_nuc[i].make_rdm1()
-
-        E_tot = 0
-        for i in range(len(mf_nuc)):
-            E_tot += mf_nuc[i].e_tot
-        logger.debug(self, 'Energy of quantum nuclei: %s', E_tot)
-        logger.debug(self, 'Energy of electrons: %s',  mf_elec.e_tot)
-        logger.debug(self, 'Energy of classcial nuclei: %s', mf_elec.energy_nuc())
-
-        E_tot += mf_elec.e_tot - self.elec_nuc_coulomb(dm_elec, dm_nuc) - self.nuc_nuc_coulomb(dm_nuc) - self.mol.nuc_num * mf_elec.energy_nuc() # substract repeatedly counted terms
-
-        return E_tot
-
     def energy_tot(self, mf_elec, mf_nuc):
         'Total energy of NEO'
         mol = self.mol
@@ -168,11 +159,18 @@ class HF(SCF):
             self.dm_nuc[i] = mf_nuc[i].make_rdm1()
 
         h1e = mf_elec.get_hcore(mf_elec.mol)
-        e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
+        if self.restrict == False:
+            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0] + self.dm_elec[1])
+        else:
+            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
         logger.debug(self, 'Energy of e1: %s', e1)
 
         vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
-        e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
+        if self.restrict == False:
+            e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) +
+                    numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5 
+        else:
+            e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec)
         logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
 
         E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
@@ -204,7 +202,7 @@ class HF(SCF):
             self.mf_nuc[i].get_occ = self.get_occ_nuc
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
-        self.mf_elec.kernel(dump_chk=False)
+        self.mf_elec.kernel()
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
@@ -228,7 +226,7 @@ class HF(SCF):
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            self.mf_elec.kernel(dump_chk=False)
+            self.mf_elec.kernel()
             self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
                 self.mf_nuc[i].kernel(dump_chk=False)
