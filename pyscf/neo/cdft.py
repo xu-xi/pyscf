@@ -214,7 +214,7 @@ class CDFT(KS):
             self.mf_nuc.append(mf)
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
-        self.mf_elec.kernel(dump_chk=False)
+        self.mf_elec.kernel(self.dm0_elec)
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mol.nuc)):
@@ -231,7 +231,7 @@ class CDFT(KS):
             cycle += 1
             E_last = E_tot
 
-            self.mf_elec.kernel(dump_chk=None)
+            self.mf_elec.kernel(self.dm0_elec)
             self.dm_elec = self.mf_elec.make_rdm1()
 
             #if cycle >= 1: # using pre-converged density can be more stable

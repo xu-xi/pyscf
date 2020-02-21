@@ -9,7 +9,63 @@ from pyscf import gto
 from pyscf import scf
 from pyscf import lib
 from pyscf.lib import logger
+from pyscf.scf import rhf
 from pyscf.scf.hf import SCF
+
+def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
+    ''' Generate density matrix with broken spatial and spin symmetry by mixing
+    HOMO and LUMO orbitals following ansatz in Szabo and Ostlund, Sec 3.8.7.
+    
+    psi_1a = numpy.cos(q)*psi_homo + numpy.sin(q)*psi_lumo
+    psi_1b = numpy.cos(q)*psi_homo - numpy.sin(q)*psi_lumo
+        
+    psi_2a = -numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
+    psi_2b =  numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
+
+    Returns: 
+        Density matrices, a list of 2D ndarrays for alpha and beta spins
+    '''
+    # opt: q, mixing parameter 0 < q < 2 pi
+    
+    #based on init_guess_by_1e
+    h1e = scf.hf.get_hcore(mol)
+    s1e = scf.hf.get_ovlp(mol)
+    mo_energy, mo_coeff = rhf.eig(h1e, s1e)
+    mf = scf.HF(mol)
+    mo_occ = mf.get_occ(mo_energy=mo_energy, mo_coeff=mo_coeff)
+
+    homo_idx=0
+    lumo_idx=1
+
+    for i in range(len(mo_occ)-1):
+        if mo_occ[i]>0 and mo_occ[i+1]<0:
+            homo_idx=i
+            lumo_idx=i+1
+
+    psi_homo=mo_coeff[:, homo_idx]
+    psi_lumo=mo_coeff[:, lumo_idx]
+    
+    Ca=numpy.zeros_like(mo_coeff)
+    Cb=numpy.zeros_like(mo_coeff)
+
+
+    #mix homo and lumo of alpha and beta coefficients
+    q=mixing_parameter
+
+    for k in range(mo_coeff.shape[0]):
+        if k == homo_idx:
+            Ca[:,k] = numpy.cos(q)*psi_homo + numpy.sin(q)*psi_lumo
+            Cb[:,k] = numpy.cos(q)*psi_homo - numpy.sin(q)*psi_lumo
+            continue
+        if k==lumo_idx:
+            Ca[:,k] = -numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
+            Cb[:,k] =  numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
+            continue
+        Ca[:,k]=mo_coeff[:,k]
+        Cb[:,k]=mo_coeff[:,k]
+
+    dm =scf.UHF(mol).make_rdm1( (Ca,Cb), (mo_occ,mo_occ) )
+    return dm 
 
 
 class HF(SCF):
@@ -37,10 +93,11 @@ class HF(SCF):
         self.restrict = restrict
         if restrict == True:
             self.mf_elec = scf.RHF(self.mol.elec)
+            self.dm0_elec = self.mf_elec.init_guess_by_atom()
         else:
             self.mf_elec = scf.UHF(self.mol.elec)
+            self.dm0_elec = init_guess_mixed(self.mol.elec)
 
-        self.mf_elec.init_guess = 'atom'
         self.mf_elec.get_hcore = self.get_hcore_elec
 
     def get_hcore_nuc(self, mole):
@@ -202,7 +259,7 @@ class HF(SCF):
             self.mf_nuc[i].get_occ = self.get_occ_nuc
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
-        self.mf_elec.kernel()
+        self.mf_elec.scf(self.dm0_elec)
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
@@ -226,7 +283,7 @@ class HF(SCF):
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            self.mf_elec.kernel()
+            self.mf_elec.scf(self.dm0_elec)
             self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
                 self.mf_nuc[i].kernel(dump_chk=False)
