@@ -38,10 +38,6 @@ class Mole(gto.mole.Mole):
         nole = gto.mole.copy(self) # a Mole object for quantum nuclei
         nole.atom_index = atom_index
 
-        self.mass = self.atom_mass_list()
-        if self.atom_symbol(atom_index) == 'H@2':
-            self.mass[atom_index] = 2.01410177811
-
         alpha = 2*math.sqrt(2)*self.mass[atom_index]
         
         if self.atom_symbol(atom_index) == 'H':
@@ -88,6 +84,12 @@ class Mole(gto.mole.Mole):
 
         self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
         logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
+
+        self.mass = self.atom_mass_list()
+        for i in range(len(self.atom_mass_list())):
+            if self.atom_symbol(i) == 'H@2': # Deuterium
+                self.mass[i] = 2.01410177811
+
         self.elec = self.elec_mole()
         self.nuc = []
         for i in range(len(self.quantum_nuc)):

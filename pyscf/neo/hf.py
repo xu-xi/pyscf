@@ -68,6 +68,7 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
     return dm 
 
 
+
 class HF(SCF):
     '''Hartree Fock for NEO
     
@@ -96,8 +97,9 @@ class HF(SCF):
             self.dm0_elec = self.mf_elec.init_guess_by_atom()
         else:
             self.mf_elec = scf.UHF(self.mol.elec)
-            self.dm0_elec = init_guess_mixed(self.mol.elec)
+            #self.dm0_elec = init_guess_mixed(self.mol.elec)
 
+        self.dm0_elec = self.mf_elec.init_guess_by_atom()
         self.mf_elec.get_hcore = self.get_hcore_elec
 
     def get_hcore_nuc(self, mole):

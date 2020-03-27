@@ -6,5 +6,5 @@ from pyscf.neo.rks import KS
 from pyscf.neo.cdft import CDFT
 from pyscf.neo.grad import Gradients
 from pyscf.neo.hessian import Hessian
-from pyscf.neo.ase import Pyscf, Pyscf_DFT
+from pyscf.neo.ase import Pyscf_NEO, Pyscf_DFT
 

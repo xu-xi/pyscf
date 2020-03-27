@@ -7,7 +7,7 @@ from ase.units import Bohr, Hartree
 from pyscf import neo
 from pyscf import gto, dft
 
-class Pyscf(Calculator):
+class Pyscf_NEO(Calculator):
 
     implemented_properties = ['energy', 'forces']
     default_parameters = {'basis': 'ccpvdz',

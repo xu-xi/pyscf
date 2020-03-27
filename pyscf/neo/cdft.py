@@ -199,7 +199,7 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, **kwargs):
+    def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, dm0_elec = None, **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
 
         # set up the Hamiltonian for each quantum nuclei in cNEO
@@ -213,8 +213,16 @@ class CDFT(KS):
             mf.get_occ = self.get_occ_nuc
             self.mf_nuc.append(mf)
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
+        
+        if dm0_elec == None:
+            dm0_elec = self.dm0_elec
 
-        self.mf_elec.kernel(self.dm0_elec)
+        self.mf_elec.kernel(dm0_elec, dump_chk=None)
+        if self.restrict == False: # use stability analysis to make initial electronic density matrix
+            mo = self.mf_elec.stability()[0]
+            dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
+            self.mf_elec.max_cycle = 200
+
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mol.nuc)):
@@ -231,7 +239,7 @@ class CDFT(KS):
             cycle += 1
             E_last = E_tot
 
-            self.mf_elec.kernel(self.dm0_elec)
+            self.mf_elec.kernel(dm0_elec, dump_chk=None)
             self.dm_elec = self.mf_elec.make_rdm1()
 
             #if cycle >= 1: # using pre-converged density can be more stable
