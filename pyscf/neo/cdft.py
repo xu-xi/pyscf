@@ -218,12 +218,13 @@ class CDFT(KS):
             dm0_elec = self.dm0_elec
 
         self.mf_elec.kernel(dm0_elec, dump_chk=None)
+        self.dm_elec = self.mf_elec.make_rdm1()
+
         if self.restrict == False: # use stability analysis to make initial electronic density matrix
             mo = self.mf_elec.stability()[0]
             dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
             self.mf_elec.max_cycle = 200
 
-        self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mol.nuc)):
             self.mf_nuc[i].kernel(dump_chk=None)
@@ -241,6 +242,10 @@ class CDFT(KS):
 
             self.mf_elec.kernel(dm0_elec, dump_chk=None)
             self.dm_elec = self.mf_elec.make_rdm1()
+            if self.restrict == False:
+                mo = self.mf_elec.stability()[0]
+                dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
+                self.mf_elec.max_cycle = 200
 
             #if cycle >= 1: # using pre-converged density can be more stable
             for i in range(len(self.mf_nuc)):
