@@ -12,6 +12,7 @@ class Pyscf_NEO(Calculator):
     implemented_properties = ['energy', 'forces']
     default_parameters = {'basis': 'ccpvdz',
                           'charge': 0,
+                          'spin': 0,
                           'xc': 'b3lyp',
                           'quantum_nuc': 'all'}  
 
@@ -27,13 +28,18 @@ class Pyscf_NEO(Calculator):
         positions = self.atoms.get_positions()
         mol.atom = []
         for i in range(len(atoms)):
-            if atoms[i] == 'D':
+            if atoms[i] == 'Mu':
+                mol.atom.append(['H@0', tuple(positions[i])])
+            elif atoms[i] == 'D':
                 mol.atom.append(['H@2', tuple(positions[i])])
             else:
                 mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
         mol.basis = self.parameters.basis
-        mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge)
-        mf = neo.CDFT(mol)
+        mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge, spin = self.parameters.spin)
+        if self.parameters.spin == 0:
+            mf = neo.CDFT(mol)
+        else:
+            mf = neo.CDFT(mol, restricted = False)
         mf.xc = self.parameters.xc
         self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
@@ -42,8 +48,10 @@ class Pyscf_NEO(Calculator):
 class Pyscf_DFT(Calculator):
 
     implemented_properties = ['energy', 'forces']
-    default_parameters = {'basis': 'ccpvdz',
+    default_parameters = {'mf':'RKS',
+                          'basis': 'ccpvdz',
                           'charge': 0,
+                          'spin': 0,
                           'xc': 'b3lyp',
                          }  
 
@@ -64,8 +72,11 @@ class Pyscf_DFT(Calculator):
             else:
                 mol.atom.append(['%s' %(atoms[i]), tuple(positions[i])])
         mol.basis = self.parameters.basis
-        mol.build(charge = self.parameters.charge)
-        mf = dft.RKS(mol)
+        mol.build(charge = self.parameters.charge, spin = self.parameters.spin)
+        if self.parameters.spin != 0:
+            mf = dft.UKS(mol)
+        else:
+            mf = dft.RKS(mol)
         mf.xc = self.parameters.xc
         self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
