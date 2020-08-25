@@ -71,14 +71,14 @@ class KnownValues(unittest.TestCase):
         hyb, fn_facs = dft.xcfun.parse_xc('0.6*CAM_B3LYP+0.4*B3P86')
         self.assertTrue(numpy.allclose(hyb, [.08+0.19*.6, 0.65*.6, 0.33]))
         self.assertTrue(numpy.allclose(fn_facs,
-                                       [(9, 0.6), (3, 0.19), (16, 0.486), (0, 0.032), (6, 0.288), (46, 0.324)]))
+                                       [(8, 0.276), (6, 0.498), (3, 0.19), (16, 0.486), (0, 0.032), (46, 0.324)]))
         rsh = dft.xcfun.rsh_coeff('0.6*CAM_B3LYP+0.4*B3P86')
         self.assertTrue(numpy.allclose(rsh, (0.33, 0.39, -0.196)))
 
         hyb, fn_facs = dft.xcfun.parse_xc('0.4*B3P86+0.6*CAM_B3LYP')
         self.assertTrue(numpy.allclose(hyb, [.08+0.19*.6, 0.65*.6, 0.33]))
         self.assertTrue(numpy.allclose(fn_facs,
-                                       [(0, 0.032), (6, 0.288), (46, 0.324), (3, 0.19), (9, 0.6), (16, 0.486)]))
+                                       [(0, 0.032), (6, 0.498), (46, 0.324), (3, 0.19), (8, 0.276), (16, 0.486)]))
         rsh = dft.xcfun.rsh_coeff('0.4*B3P86+0.6*CAM_B3LYP')
         self.assertTrue(numpy.allclose(rsh, (0.33, 0.39, -0.196)))
 
@@ -172,6 +172,13 @@ class KnownValues(unittest.TestCase):
         self.assertAlmostEqual(numpy.dot(rho[0],f[0]), 186.823806251777, 7)
         self.assertAlmostEqual(numpy.dot(rho[0],f[1]), -3391.2428894571085, 6)
         self.assertAlmostEqual(numpy.dot(rho[0],f[2]), 0, 9)
+
+    #def test_tpss(self):
+    #    #FIXME: raised numerical error
+    #    rho_a = numpy.array([[3.67808547e-08,-2.02358682e-08, 2.16729780e-07, 2.27036045e-07,-1.47795869e-07,-1.45668997e-09]]).T
+    #    e, v = dft.xcfun.eval_xc('tpss,', rho_a, spin=0, deriv=1)[:2]
+    #    rho_b = numpy.array([[4.53272893e-06, 4.18968775e-06,-2.83034672e-06, 2.61832978e-06, 5.63360737e-06, 8.97541777e-07]]).T
+    #    e, v = dft.xcfun.eval_xc('tpss,', (rho_a, rho_b), spin=1, deriv=1)[:2]
 
     def test_beckex(self):
         rho =(numpy.array([1.    , 1., 0., 0.]).reshape(-1,1),
