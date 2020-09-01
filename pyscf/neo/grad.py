@@ -38,6 +38,7 @@ class Gradients(lib.StreamObject):
     #as_scanner = grad.rhf.as_scanner
 
     def grad_elec(self, atmlst=None):
+        'gradients of electrons and classic nuclei'
         g = self.scf.mf_elec.nuc_grad_method()
         g.verbose = 2
         return g.grad(atmlst = atmlst)

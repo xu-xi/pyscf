@@ -4,7 +4,7 @@ import sys, numpy, scipy, copy
 from pyscf import scf
 from pyscf import gto
 from pyscf import dft 
-from pyscf.neo.rks import KS
+from pyscf.neo.ks import KS
 from pyscf.lib import logger
 
 class CDFT(KS):
@@ -22,7 +22,7 @@ class CDFT(KS):
         self.mol = mol
         self.scf = self.inner_scf
         self.xc = 'b3lyp'
-        self.mf_elec.xc = self.xc # beta 
+        self.mf_elec.xc = self.xc # test 
         self.f = [numpy.zeros(3)] * self.mol.natm
 
     def get_hcore_nuc(self, mol):
@@ -199,9 +199,10 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-8, max_cycle = 60, dm0_elec = None, **kwargs):
+    def inner_scf(self, conv_tol = 1e-8, max_cycle = 20, dm0_elec = None, opt_method = 'hybr', **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
 
+        self.mf_elec.conv_tol = conv_tol * 0.1
         # set up the Hamiltonian for each quantum nuclei in cNEO
         self.mf_nuc = [] 
         for i in range(len(self.mol.nuc)):
@@ -211,10 +212,11 @@ class CDFT(KS):
             mf.get_hcore = self.get_hcore_nuc
             mf.get_veff = self.get_veff_nuc_bare
             mf.get_occ = self.get_occ_nuc
+            mf.conv_tol = conv_tol * 0.1
             self.mf_nuc.append(mf)
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
         
-        if dm0_elec == None:
+        if dm0_elec is None:
             dm0_elec = self.dm0_elec
 
         self.mf_elec.kernel(dm0_elec, dump_chk=None)
@@ -224,7 +226,6 @@ class CDFT(KS):
             mo = self.mf_elec.stability()[0]
             dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
             self.mf_elec.max_cycle = 200
-
 
         for i in range(len(self.mol.nuc)):
             self.mf_nuc[i].kernel(dump_chk=None)
@@ -252,7 +253,7 @@ class CDFT(KS):
                 mf = self.mf_nuc[i]
                 index = mf.mol.atom_index
                 #self.f = self.optimal_f(self.mf_nuc)
-                opt = scipy.optimize.root(self.first_order_de, self.f[index], args=mf, method='hybr')
+                opt = scipy.optimize.root(self.first_order_de, self.f[index], args=mf, method=opt_method)
                 self.f[index] = opt.x
                 logger.info(self, 'f of %s(%i) atom: %s' %(self.mol.atom_symbol(index), index, self.f[index]))
                 logger.info(self, '1st de of L: %s', opt.fun)

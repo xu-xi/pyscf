@@ -24,19 +24,19 @@ class Mole(gto.mole.Mole):
     def elec_mole(self):
         'return a Mole object for NEO-electron and classical nuclei'
 
-        eole = gto.mole.copy(self) # a Mole object for electrons
+        elec = gto.mole.copy(self) # a Mole object for electrons
         quantum_nuclear_charge = 0
         for i in range(self.natm):
             if self.quantum_nuc[i] == True:
-                quantum_nuclear_charge -= eole._atm[i,0]
-                eole._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
-        eole.charge += quantum_nuclear_charge # charge determines the number of electrons
-        return eole
+                quantum_nuclear_charge -= elec._atm[i,0]
+                elec._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
+        elec.charge += quantum_nuclear_charge # charge determines the number of electrons
+        return elec
 
     def nuc_mole(self, atom_index, n, beta):
         'return a Mole object for specified quantum nuclei, the default basis is even-tempered Gaussian basis'
-        nole = gto.mole.copy(self) # a Mole object for quantum nuclei
-        nole.atom_index = atom_index
+        nuc = gto.mole.copy(self) # a Mole object for quantum nuclei
+        nuc.atom_index = atom_index
 
         alpha = 2*math.sqrt(2)*self.mass[atom_index]
         
@@ -50,21 +50,21 @@ class Mole(gto.mole.Mole):
         # even-tempered basis 
         basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
         logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
-        nole._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
-        nole._atm, nole._bas, nole._env = gto.mole.make_env(nole._atom, nole._basis, self._env[:gto.PTR_ENV_START])
+        nuc._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
+        nuc._atm, nuc._bas, nuc._env = gto.mole.make_env(nuc._atom, nuc._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0
         for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
-                quantum_nuclear_charge -= nole._atm[i,0]
-                nole._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
+                quantum_nuclear_charge -= nuc._atm[i,0]
+                nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
-        nole.charge += quantum_nuclear_charge
-        nole.charge = 2
-        nole.spin = 0 
-        #nole.nelectron = 1
+        nuc.charge += quantum_nuclear_charge
+        nuc.charge = 2
+        nuc.spin = 0 
+        #nuc.nelectron = 1
         #self.nuc.nelectron = self.nuc_num
         #self.nuc.spin = self.nuc_num
-        return nole
+        return nuc
 
     def build(self, quantum_nuc = 'all', n = 8, beta = math.sqrt(2), **kwargs):
         'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
@@ -85,7 +85,7 @@ class Mole(gto.mole.Mole):
         self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
         logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
 
-        self.mass = [float(i) for i in self.atom_mass_list()] # test
+        self.mass = [float(i) for i in self.atom_mass_list()] # test: need to minus the mass of electrons? 
         #self.mass = self.atom_mass_list()
         for i in range(len(self.atom_mass_list())):
             if self.atom_symbol(i) == 'H@2': # Deuterium

@@ -39,7 +39,7 @@ class Pyscf_NEO(Calculator):
         if self.parameters.spin == 0:
             mf = neo.CDFT(mol)
         else:
-            mf = neo.CDFT(mol, restricted = False)
+            mf = neo.CDFT(mol, restrict = False)
         mf.xc = self.parameters.xc
         self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
