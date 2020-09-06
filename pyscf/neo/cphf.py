@@ -12,7 +12,9 @@ class CPHF(lib.StreamObject):
         self.mol = scf_method.mol
         self.base = scf_method
         self.atmlst = range(self.mol.natm)
-
+        global occidx_e, viridx_e
+        occidx_e = self.base.mf_elec.mo_occ > 0
+        viridx_e = self.base.mf_elec.mo_occ == 0
         #nset = 3*len(self.atmlst)
 
     def ao2mo(self, mf, mat):
@@ -172,134 +174,158 @@ class CPHF(lib.StreamObject):
             response = numpy.concatenate((response, self.get_R(i, mo1).ravel()))
         return response
 
-    def get_Bmat_elec(self, mf_elec, a):
-        'get the B matrix for electrons w.r.t. the a-th nuclei'
-        mol = mf_elec.mol
+    def get_Bmat_elec(self, mf_e):
+        'get the B matrix for electrons w.r.t. the displacement of nuclei'
+        mol = mf_e.mol
 
-        occidx = mf_elec.mo_occ > 0
-        viridx = mf_elec.mo_occ == 0
-        e_a = mf_elec.mo_energy[viridx]
-        e_i = mf_elec.mo_energy[occidx]
+        e_a = mf_e.mo_energy[viridx_e]
+        e_i = mf_e.mo_energy[occidx_e]
         e_ai = 1 / lib.direct_sum('a-i->ai', e_a, e_i)
         nvir, nocc = e_ai.shape
-        nao, nmo = mf_elec.mo_coeff.shape
+        nao, nmo = mf_e.mo_coeff.shape
 
-        shl0, shl1, p0, p1 = self.mol.aoslice_by_atom()[a, :]
-
-        h1ao = numpy.zeros((3,nao,nao))
-        s1ao = numpy.zeros((3,nao,nao))
-        v1en_ao = numpy.zeros((3,nao,nao))
-
-        hobj = mf_elec.Hessian()
-        h1ao += hobj.make_h1(mf_elec.mo_coeff, mf_elec.mo_occ)[a]
+        hobj = mf_e.Hessian()
+        h1ao = hobj.make_h1(mf_e.mo_coeff, mf_e.mo_occ) # TODO: use checkfile to save time
 
         s1a = -mol.intor('int1e_ipovlp', comp=3)
-        s1ao[:,p0:p1] += s1a[:,p0:p1]
-        s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
+        aoslices = mol.aoslice_by_atom()
+        Bs = []
+        for a in range(len(self.atmlst)):
+            shl0, shl1, p0, p1 = aoslices[a, :]
 
-        if self.mol.quantum_nuc[a] == True:
-            for i in range(len(self.mol.nuc)):
-                if self.mol.nuc[i].atom_index == a:
-                    v1en_ao += scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.elec, self.mol.elec), self.base.dm_nuc[i], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0]
-                    v1en_ao += v1en_ao.transpose(0, 2, 1)
-                    #shls_slice = (0, mol.nbas) + (shl0, shl1)  + (0, self.mol.nuc[i].nbas)*2
-                    v1en_ao2 = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0] #test
-                    v1en_ao[:,p0:p1] += v1en_ao2[:,p0:p1]
-                    v1en_ao[:,:,p0:p1] += v1en_ao2[:,p0:p1].transpose(0,2,1)
+            s1ao = numpy.zeros((3,nao,nao))
+            v1en_ao = numpy.zeros((3,nao,nao))
 
-        B = self.ao2mo(mf_elec, h1ao - v1en_ao)  - self.ao2mo(mf_elec, s1ao)*e_i
-        B[:,viridx] *= -e_ai
-        B[:,occidx] = - self.ao2mo(mf_elec, s1ao)[:, occidx] * .5
-        #print(B.shape)
-        return B
+            s1ao[:,p0:p1] += s1a[:,p0:p1]
+            s1ao[:,:,p0:p1] += s1a[:,p0:p1].transpose(0,2,1)
 
-    def get_Bmat_nuc(self, mf_nuc, a):
-        'get the B matrix for quantum nuclei w.r.t the a-th nuclei'
-        mol = mf_nuc.mol
+            if self.mol.quantum_nuc[a] == True:
+                for i in range(len(self.mol.nuc)):
+                    if self.mol.nuc[i].atom_index == a:
+                        v1en_ao += scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.elec, self.mol.elec), self.base.dm_nuc[i], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0]
+                        v1en_ao += v1en_ao.transpose(0, 2, 1)
+                        #shls_slice = (0, mol.nbas) + (shl0, shl1)  + (0, self.mol.nuc[i].nbas)*2
+                        v1en_ao2 = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0] #test
+                        v1en_ao[:,p0:p1] += v1en_ao2[:,p0:p1]
+                        v1en_ao[:,:,p0:p1] += v1en_ao2[:,p0:p1].transpose(0,2,1)
+
+            B = self.ao2mo(mf_e, h1ao[a] - v1en_ao) - self.ao2mo(mf_e, s1ao)*e_i
+            B[:,viridx_e] *= -e_ai
+            B[:,occidx_e] = - self.ao2mo(mf_e, s1ao)[:, occidx_e] * .5
+            Bs.append(B)
+        return numpy.array(Bs).reshape(-1, nmo, nocc) # test: reshape order match
+
+    def get_Bmat_nuc(self, mf_n):
+        'get the B matrix for quantum nuclei w.r.t the the displacement of nuclei'
+        mol = mf_n.mol
         i = mol.atom_index
 
-        occidx = mf_nuc.mo_occ > 0
-        viridx = mf_nuc.mo_occ == 0
-        e_i = mf_nuc.mo_energy[occidx]
-        e_a = mf_nuc.mo_energy[viridx]
+        occidx = mf_n.mo_occ > 0
+        viridx = mf_n.mo_occ == 0
+        e_i = mf_n.mo_energy[occidx]
+        e_a = mf_n.mo_energy[viridx]
         e_ai = 1 / lib.direct_sum('a-i->ai', e_a, e_i)
         nvir, nocc = e_ai.shape
-        nao, nmo = mf_nuc.mo_coeff.shape
+        nao, nmo = mf_n.mo_coeff.shape
+        
+        Bs = []
+        for a in range(len(self.atmlst)):
+            h1ao = numpy.zeros((3,nao,nao))
+            v1ne_ao = numpy.zeros((3,nao,nao))
+            v1nn_ao = numpy.zeros((3,nao,nao))
+            s1ao = numpy.zeros((3,nao,nao))
+            f1ao = numpy.zeros((3,nao,nao))
 
-        h1ao = numpy.zeros((3,nao,nao))
-        v1ne_ao = numpy.zeros((3,nao,nao))
-        v1nn_ao = numpy.zeros((3,nao,nao))
-        s1ao = numpy.zeros((3,nao,nao))
-        f1ao = numpy.zeros((3,nao,nao))
-
-        if i == a:
-            mass = 1836.15267343 * self.mol.mass[i]
-            h1ao += mol.intor('int1e_ipkin', comp=3)/mass
-            h1ao -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
-            h1ao += h1ao.transpose(0, 2, 1)
-    
-            v1ne_ao += scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.base.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
-            v1ne_ao += v1ne_ao.transpose(0, 2, 1)
-            
-            for j in range(len(self.mol.nuc)):
-                k = self.mol.nuc[j].atom_index
-                if k != i:
-                    v1nn_ao += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
-            v1nn_ao += v1nn_ao.transpose(0, 2, 1)
-
-            f1ao += numpy.einsum('ijkl,j->ikl', -mol.intor('int1e_irp').reshape(3, 3, nao, nao), self.base.f[i]) #beta
-            f1ao += f1ao.transpose(0, 2, 1)
-
-            s1ao -= mol.intor('int1e_ipovlp', comp=3) 
-            s1ao += s1ao.transpose(0, 2, 1)
-
-        else:
-            if self.mol.quantum_nuc[a] == True:
+            if i == a:
+                mass = 1836.15267343 * self.mol.mass[i]
+                h1ao += mol.intor('int1e_ipkin', comp=3)/mass
+                h1ao -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
+                h1ao += h1ao.transpose(0, 2, 1)
+        
+                v1ne_ao += scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.base.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
+                v1ne_ao += v1ne_ao.transpose(0, 2, 1)
+                
                 for j in range(len(self.mol.nuc)):
                     k = self.mol.nuc[j].atom_index
-                    if k == a:
-                        v1nn_ao += scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], mol, mol), self.base.dm_nuc[j], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
+                    if k != i:
+                        v1nn_ao += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
                 v1nn_ao += v1nn_ao.transpose(0, 2, 1)
+
+                f1ao += numpy.einsum('ijkl,j->ikl', -mol.intor('int1e_irp').reshape(3, 3, nao, nao), self.base.f[i]) #beta
+                f1ao += f1ao.transpose(0, 2, 1)
+
+                s1ao -= mol.intor('int1e_ipovlp', comp=3) 
+                s1ao += s1ao.transpose(0, 2, 1)
+
             else:
-                with mol.with_rinv_as_nucleus(a):
-                    vrinv = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
-                    vrinv *= (mol.atom_charge(a)*self.mol._atm[i,0])
-                h1ao = vrinv + vrinv.transpose(0, 2, 1)
+                if self.mol.quantum_nuc[a] == True:
+                    for j in range(len(self.mol.nuc)):
+                        k = self.mol.nuc[j].atom_index
+                        if k == a:
+                            v1nn_ao += scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], mol, mol), self.base.dm_nuc[j], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
+                    v1nn_ao += v1nn_ao.transpose(0, 2, 1)
+                else:
+                    with mol.with_rinv_as_nucleus(a):
+                        vrinv = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
+                        vrinv *= (mol.atom_charge(a)*self.mol._atm[i,0])
+                    h1ao = vrinv + vrinv.transpose(0, 2, 1)
 
-        shl0, shl1, p0, p1 = self.mol.aoslice_by_atom()[a, :]
-        shls_slice = (0, self.mol.elec.nbas) + (shl0, shl1) + (0, mol.nbas)*2
-        v1ne_ao += scf.jk.get_jk((self.mol.elec, self.mol.elec, mol, mol), self.base.dm_elec[p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', shls_slice=shls_slice, comp=3)*self.mol._atm[i,0] #test
-        v1ne_ao += v1ne_ao.transpose(0, 2, 1)
+            shl0, shl1, p0, p1 = self.mol.aoslice_by_atom()[a, :]
+            shls_slice = (0, self.mol.elec.nbas) + (shl0, shl1) + (0, mol.nbas)*2
+            v1ne_ao += scf.jk.get_jk((self.mol.elec, self.mol.elec, mol, mol), self.base.dm_elec[p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', shls_slice=shls_slice, comp=3)*self.mol._atm[i,0] #test
+            v1ne_ao += v1ne_ao.transpose(0, 2, 1)
 
-        B = self.ao2mo(mf_nuc, h1ao - v1ne_ao + v1nn_ao)  - self.ao2mo(mf_nuc, s1ao)*e_i
-        B[:,viridx] *= -e_ai
-        B[:,occidx] = -self.ao2mo(mf_nuc, s1ao)[:,occidx] * .5
-        return B
+            B = self.ao2mo(mf_n, h1ao - v1ne_ao + v1nn_ao)  - self.ao2mo(mf_n, s1ao)*e_i
+            B[:,viridx] *= -e_ai
+            B[:,occidx] = -self.ao2mo(mf_n, s1ao)[:,occidx] * .5
+            Bs.append(B)
+        return numpy.array(Bs).reshape(-1, nmo, nocc)
 
     def kernel(self, max_cycle=20, tol=1e-9, hermi=False):
         '''
         CPHF solver for cNEO.
 
         mo1_e: 1st order response of electronic orbital coefficients to the displacements of nuclei.
-        e1: 1st order response of electronic eigenvalues to the displacements of nuclei.
+        e1_e: 1st order response of electronic eigenvalues to the displacements of nuclei.
         mo1_n: 1st order response of nuclear orbital coefficients to the displacements of nuclei.
-        n1: 1st order response of nuclear eigenvalues to the displacements of nuclei.
+        e1_n: 1st order response of nuclear eigenvalues to the displacements of nuclei.
         '''
-        #vind_vo = self.get_Amat()
         
+        e_i = self.base.mf_elec.mo_energy[occidx_e]
         mo1base = numpy.array([])
-        for j in range(self.mol.natm):
-            mo1base = numpy.concatenate((mo1base, self.get_Bmat_elec(self.base.mf_elec, j).ravel()))
+        B_e = self.get_Bmat_elec(self.base.mf_elec)
+        mo1base = numpy.concatenate((mo1base, B_e.ravel()))
         for i in range(len(self.mol.nuc)):
-            for j in range(self.mol.natm):
-                mo1base = numpy.concatenate((mo1base, self.get_Bmat_nuc(self.base.mf_nuc[i],j).ravel()))
-        for i in range(len(self.mol.nuc)):
+            mo1base = numpy.concatenate((mo1base, self.get_Bmat_nuc(self.base.mf_nuc[i]).ravel()))
+        for i in range(len(self.mol.nuc)): # test: the order
             for j in range(self.mol.natm):
                 mo1base = numpy.concatenate((mo1base, numpy.identity(3).ravel()))
-        print('mo1base', len(mo1base))
+        print('The size of CPHF equations', len(mo1base))
 
         mo1 = lib.krylov(self.full_response, mo1base, tol=tol, max_cycle=max_cycle, hermi=hermi)
-        print(mo1.shape)
-        #return mo1_e, e1, mo1_n, n1 
+        mo1_e, mo1_n, f1 = self.mo12ne(mo1)
+
+        v1mo_e = self.get_A_e(mo1)
+        mo1_e[:,viridx_e] = B_e[:,viridx_e] - v1mo_e[:,viridx_e]
+
+        e1_e = B_e[:,occidx_e] + mo1_e[:,occidx_e] * lib.direct_sum('i-j->ij', e_i, e_i)
+        e1_e += v1mo_e[:,occidx_e]
+
+        e1_n = []
+        for i in range(len(self.mol.nuc)):
+            mf_n = self.base.mf_nuc[i]
+            occidx = mf_n.mo_occ > 0
+            viridx = mf_n.mo_occ == 0
+            e_i = mf_n.mo_energy[occidx]
+
+            v1mo_n = self.get_A_n(i, mo1)
+            B_n = self.get_Bmat_nuc(mf_n)
+            mo1_n[i][:,viridx] = B_n[:, viridx] - v1mo_n[:, viridx]
+
+            e1 = B_n[:, occidx] + mo1_n[i][:, occidx] * lib.direct_sum('i-j', e_i, e_i)
+            e1 += v1mo_n[:, occidx]
+            e1_n.append(e1)
+        
+        return mo1_e, e1_e, mo1_n, e1_n, f1 
 
 
