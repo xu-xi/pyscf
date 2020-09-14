@@ -5,6 +5,7 @@ Coupled perturbed Hartree-Fock for constrained nuclear-electronic orbital method
 '''
 import numpy
 from pyscf import lib, gto, scf
+from pyscf.hessian.rks import Hessian
 from functools import reduce
 
 class CPHF(lib.StreamObject):
@@ -184,7 +185,8 @@ class CPHF(lib.StreamObject):
         nvir, nocc = e_ai.shape
         nao, nmo = mf_e.mo_coeff.shape
 
-        hobj = mf_e.Hessian()
+        #hobj = mf_e.Hessian()
+        hobj = Hessian(mf_e)
         h1ao = hobj.make_h1(mf_e.mo_coeff, mf_e.mo_occ) # TODO: use checkfile to save time
 
         s1a = -mol.intor('int1e_ipovlp', comp=3)
@@ -204,7 +206,6 @@ class CPHF(lib.StreamObject):
                     if self.mol.nuc[i].atom_index == a:
                         v1en_ao += scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.elec, self.mol.elec), self.base.dm_nuc[i], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0]
                         v1en_ao += v1en_ao.transpose(0, 2, 1)
-                        #shls_slice = (0, mol.nbas) + (shl0, shl1)  + (0, self.mol.nuc[i].nbas)*2
                         v1en_ao2 = scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[a,0] #test
                         v1en_ao[:,p0:p1] += v1en_ao2[:,p0:p1]
                         v1en_ao[:,:,p0:p1] += v1en_ao2[:,p0:p1].transpose(0,2,1)
@@ -271,8 +272,8 @@ class CPHF(lib.StreamObject):
                     h1ao = vrinv + vrinv.transpose(0, 2, 1)
 
             shl0, shl1, p0, p1 = self.mol.aoslice_by_atom()[a, :]
-            shls_slice = (0, self.mol.elec.nbas) + (shl0, shl1) + (0, mol.nbas)*2
-            v1ne_ao += scf.jk.get_jk((self.mol.elec, self.mol.elec, mol, mol), self.base.dm_elec[p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', shls_slice=shls_slice, comp=3)*self.mol._atm[i,0] #test
+            shls_slice = (shl0, shl1) + (0, self.mol.elec.nbas) + (0, mol.nbas)*2
+            v1ne_ao += scf.jk.get_jk((self.mol.elec, self.mol.elec, mol, mol), self.base.dm_elec[:, p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1_sph', shls_slice=shls_slice, comp=3)*self.mol._atm[i,0] #test: shls_slice
             v1ne_ao += v1ne_ao.transpose(0, 2, 1)
 
             B = self.ao2mo(mf_n, h1ao - v1ne_ao + v1nn_ao)  - self.ao2mo(mf_n, s1ao)*e_i
