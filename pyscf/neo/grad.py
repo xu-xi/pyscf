@@ -65,16 +65,16 @@ class Gradients(lib.StreamObject):
         jcross = 0
         for i in range(len(self.mol.nuc)):
             index = self.mol.nuc[i].atom_index
-            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[index,0]
+            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[index,0]
         return -jcross
 
     def grad_jcross_nuc_elec(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
         i = mol.atom_index
         if self.scf.restrict == True:
-            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
+            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]
         else:
-            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]
+            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]
 
         return -jcross
 
@@ -85,7 +85,7 @@ class Gradients(lib.StreamObject):
         for j in range(len(self.mol.nuc)):
             k = self.mol.nuc[j].atom_index
             if k != i:
-                jcross += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1_sph', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
+                jcross += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
         return -jcross
 
     def get_ovlp(self, mol):
@@ -101,7 +101,7 @@ class Gradients(lib.StreamObject):
 
     def get_veff(self):
         'not used'
-        vj, vk = scf.jk.get_jk(self.mol.nuc, (self.scf.dm_nuc, self.scf.dm_nuc), ('ijkl,ji->kl','ijkl,li->kj'), intor='int2e_ip1_sph', comp=3)
+        vj, vk = scf.jk.get_jk(self.mol.nuc, (self.scf.dm_nuc, self.scf.dm_nuc), ('ijkl,ji->kl','ijkl,li->kj'), intor='int2e_ip1', comp=3)
         return vj - vk
 
     def kernel(self, atmlst=None):
