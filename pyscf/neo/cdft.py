@@ -36,7 +36,7 @@ class CDFT(KS):
         # Coulomb interactions between quantum nucleus and electrons
         if self.dm_elec is not None:
             if self.restrict == True:
-                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * self.mol._atm[i,0]
             else:
                 h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
                 h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]

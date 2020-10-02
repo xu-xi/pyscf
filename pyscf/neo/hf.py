@@ -94,12 +94,11 @@ class HF(SCF):
         self.restrict = restrict
         if restrict == True:
             self.mf_elec = scf.RHF(self.mol.elec)
-            self.dm0_elec = self.mf_elec.init_guess_by_atom()
         else:
             self.mf_elec = scf.UHF(self.mol.elec)
             #self.dm0_elec = init_guess_mixed(self.mol.elec)
 
-        self.dm0_elec = self.mf_elec.init_guess_by_atom()
+        self.dm0_elec = self.mf_elec.get_init_guess(key='atom')
         self.mf_elec.get_hcore = self.get_hcore_elec
 
     def get_hcore_nuc(self, mole):
@@ -161,7 +160,7 @@ class HF(SCF):
         # Coulomb interactions between electrons and all quantum nuclei
         for i in range(len(self.dm_nuc)):
             if isinstance(self.dm_nuc[i], numpy.ndarray):
-                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]), self.dm_nuc[i], scripts='ijkl,lk->ij', aosym='s4') * self.mol._atm[self.mol.nuc[i].atom_index, 0]
+                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]), self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * self.mol._atm[self.mol.nuc[i].atom_index, 0]
 
         return scf.hf.get_hcore(mole) + j
 
@@ -187,7 +186,7 @@ class HF(SCF):
         mol = self.mol
         jcross = 0
         for i in range(len(dm_nuc)):
-            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', aosym = 's4') * mol._atm[mol.nuc[i].atom_index, 0]
+            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * mol._atm[mol.nuc[i].atom_index, 0]
         if self.restrict == False:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
         else:
