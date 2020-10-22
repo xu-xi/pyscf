@@ -331,11 +331,12 @@ class CPHF(lib.StreamObject):
 
         mo1 = lib.krylov(self.full_response, mo1base, tol=tol, max_cycle=max_cycle, hermi=hermi)
         mo1_e, mo1_n, f1 = self.mo12ne(mo1)
-        print('f1', f1)
+        #print('f1', f1)
 
         v1mo_e = self.get_A_e(mo1_e, mo1_n)
+        B_e, s1 = self.get_Bmat_elec(self.base.mf_elec)
         e1_e = B_e[:,occidx_e] + mo1_e[:,occidx_e] * lib.direct_sum('i-j->ij', e_i, e_i) - v1mo_e[:,occidx_e]
-        #print('e1_e', e1_e)
+        #print('e1e', e1_e)
 
         e1_n = []
         for i in range(len(self.mol.nuc)):
@@ -350,7 +351,7 @@ class CPHF(lib.StreamObject):
             v1mo_n = self.get_A_n(i, mo1_e, mo1_n, f1)
             B_n, s1 = self.get_Bmat_nuc(i)
             e1 = B_n[:,occidx] + mo1_n[i][:,occidx] * lib.direct_sum('i-j->ij', e_i, e_i) - v1mo_n[:,occidx]
-            print('e1n', e1)
+            #print('e1n', e1)
             e1_n.append(e1)
         
         return mo1_e, e1_e, mo1_n, e1_n, f1 
