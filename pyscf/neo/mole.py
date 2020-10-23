@@ -59,7 +59,7 @@ class Mole(gto.mole.Mole):
                 nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
         nuc.charge += quantum_nuclear_charge
-        nuc.charge = 2
+        #nuc.charge = 2
         nuc.spin = 0 
         #nuc.nelectron = 1
         #self.nuc.nelectron = self.nuc_num

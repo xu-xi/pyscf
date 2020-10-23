@@ -98,7 +98,7 @@ class HF(SCF):
             self.mf_elec = scf.UHF(self.mol.elec)
             #self.dm0_elec = init_guess_mixed(self.mol.elec)
 
-        self.dm0_elec = self.mf_elec.get_init_guess(key='atom')
+        self.dm0_elec = self.mf_elec.get_init_guess(key='1e')
         self.mf_elec.get_hcore = self.get_hcore_elec
 
     def get_hcore_nuc(self, mole):

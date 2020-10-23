@@ -31,8 +31,6 @@ class Gradients(lib.StreamObject):
         self.base = scf_method
         self.scf = scf_method
         self.verbose = 4
-        atmlst = self.mol.quantum_nuc
-        self.atmlst = [i for i in range(len(atmlst)) if atmlst[i] == False] # a list for classical nuclei
         self.grad = self.kernel
 
     #as_scanner = grad.rhf.as_scanner
@@ -47,16 +45,16 @@ class Gradients(lib.StreamObject):
         'part of the gradients of core Hamiltonian of quantum nucleus'
         i = mol.atom_index
         mass = 1836.15267343 * self.mol.mass[i]
-        h = mol.intor('int1e_ipkin', comp=3)/mass
-        h -= mol.intor('int1e_ipnuc', comp=3)*self.mol._atm[i,0]
-        return -h # minus sign for the derivative is taken w.r.t 'r' instead of 'R'
+        h = -mol.intor('int1e_ipkin', comp=3)/mass # minus sign for the derivative is taken w.r.t 'r' instead of 'R'
+        h += mol.intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(i)
+        return h
 
     def hcore_deriv(self, atm_id, mol): 
         'The change of Coulomb interactions between quantum and classical nuclei due to the change of the coordinates of classical nuclei'
         i = mol.atom_index
         with mol.with_rinv_as_nucleus(atm_id):
             vrinv = mol.intor('int1e_iprinv', comp=3) # <\nabla|1/r|>
-            vrinv *= (mol.atom_charge(atm_id)*self.mol._atm[i,0])
+            vrinv *= (mol.atom_charge(atm_id)*self.mol.atom_charge(i))
 
         return vrinv + vrinv.transpose(0,2,1)
 
@@ -65,18 +63,18 @@ class Gradients(lib.StreamObject):
         jcross = 0
         for i in range(len(self.mol.nuc)):
             index = self.mol.nuc[i].atom_index
-            jcross += scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[index,0]
-        return -jcross
+            jcross -= scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(index)
+        return jcross
 
     def grad_jcross_nuc_elec(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
         i = mol.atom_index
         if self.scf.restrict == True:
-            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]
+            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
         else:
-            jcross = scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]
+            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
 
-        return -jcross
+        return jcross
 
     def grad_jcross_nuc_nuc(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nuclei'
@@ -85,8 +83,8 @@ class Gradients(lib.StreamObject):
         for j in range(len(self.mol.nuc)):
             k = self.mol.nuc[j].atom_index
             if k != i:
-                jcross += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3)*self.mol._atm[i,0]*self.mol._atm[k,0]
-        return -jcross
+                jcross -= scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)*self.mol.atom_charge(k)
+        return jcross
 
     def get_ovlp(self, mol):
         return -mol.intor('int1e_ipovlp', comp=3)
@@ -98,11 +96,6 @@ class Gradients(lib.StreamObject):
         mo0 = mo_coeff[:,mo_occ>0]
         mo0e = mo0 * (mo_energy[mo_occ>0] * mo_occ[mo_occ>0])
         return numpy.dot(mo0e, mo0.T.conj())
-
-    def get_veff(self):
-        'not used'
-        vj, vk = scf.jk.get_jk(self.mol.nuc, (self.scf.dm_nuc, self.scf.dm_nuc), ('ijkl,ji->kl','ijkl,li->kj'), intor='int2e_ip1', comp=3)
-        return vj - vk
 
     def kernel(self, atmlst=None):
         'Unit: Hartree/Bohr'
