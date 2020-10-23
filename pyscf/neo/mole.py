@@ -85,9 +85,8 @@ class Mole(gto.mole.Mole):
         self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
         logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
 
-        self.mass = [float(i) for i in self.atom_mass_list()] # test: need to minus the mass of electrons? 
-        #self.mass = self.atom_mass_list()
-        for i in range(len(self.atom_mass_list())):
+        self.mass = self.atom_mass_list(isotope_avg=True)
+        for i in range(len(self.mass)):
             if self.atom_symbol(i) == 'H@2': # Deuterium
                 self.mass[i] = 2.01410177811
             elif self.atom_symbol(i) == 'H@0': # Muonium
