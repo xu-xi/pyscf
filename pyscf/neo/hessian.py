@@ -6,6 +6,8 @@ Analytical Hessian for constrained nuclear-electronic orbitals
 import numpy
 from pyscf import lib
 from pyscf import scf
+from pyscf.data import nist
+from pyscf.hessian.thermo import _get_TR, rotation_const, _get_rotor_type
 from pyscf.neo.cphf import CPHF
 from functools import reduce
 
@@ -399,6 +401,77 @@ class Hessian(lib.StreamObject):
 
         print('hess', hess)
         return hess
+
+    def harmonic_analysis(self, mol, hess, exclude_trans=True, exclude_rot=True,
+                          imaginary_freq=True):
+        '''Each column is one mode
+        
+        imaginary_freq (boolean): save imaginary_freq as complex number (if True)
+        or negative real number (if False)
+        copy from pyscf.hessian.thermo
+        '''
+        results = {}
+        atom_coords = mol.atom_coords()
+        mass = mol.mass
+        mass_center = numpy.einsum('z,zx->x', mass, atom_coords) / mass.sum()
+        atom_coords = atom_coords - mass_center
+        natm = atom_coords.shape[0]
+
+        mass_hess = numpy.einsum('pqxy,p,q->pqxy', hess, mass**-.5, mass**-.5)
+        h = mass_hess.transpose(0,2,1,3).reshape(natm*3,natm*3)
+
+        TR = _get_TR(mass, atom_coords)
+        TRspace = []
+        if exclude_trans:
+            TRspace.append(TR[:3])
+
+        if exclude_rot:
+            rot_const = rotation_const(mass, atom_coords)
+            rotor_type = _get_rotor_type(rot_const)
+            if rotor_type == 'ATOM':
+                pass
+            elif rotor_type == 'LINEAR':  # linear molecule
+                TRspace.append(TR[3:5])
+            else:
+                TRspace.append(TR[3:])
+
+        if TRspace:
+            TRspace = numpy.vstack(TRspace)
+            q, r = numpy.linalg.qr(TRspace.T)
+            P = numpy.eye(natm * 3) - q.dot(q.T)
+            w, v = numpy.linalg.eigh(P)
+            bvec = v[:,w > 1e-7]
+            h = reduce(numpy.dot, (bvec.T, h, bvec))
+            force_const_au, mode = numpy.linalg.eigh(h)
+            mode = bvec.dot(mode)
+        else:
+            force_const_au, mode = numpy.linalg.eigh(h)
+
+        freq_au = numpy.lib.scimath.sqrt(force_const_au)
+        results['freq_error'] = numpy.count_nonzero(freq_au.imag > 0)
+        if not imaginary_freq and numpy.iscomplexobj(freq_au):
+            # save imaginary frequency as negative frequency
+            freq_au = freq_au.real - abs(freq_au.imag)
+
+        results['freq_au'] = freq_au
+        au2hz = (nist.HARTREE2J / (nist.ATOMIC_MASS * nist.BOHR_SI**2))**.5 / (2 * numpy.pi)
+        results['freq_wavenumber'] = freq_wn = freq_au * au2hz / nist.LIGHT_SPEED_SI * 1e-2
+
+        norm_mode = numpy.einsum('z,zri->izr', mass**-.5, mode.reshape(natm,3,-1))
+        results['norm_mode'] = norm_mode
+        reduced_mass = 1./numpy.einsum('izr,izr->i', norm_mode, norm_mode)
+        results['reduced_mass'] = reduced_mass
+
+        # https://en.wikipedia.org/wiki/Vibrational_temperature
+        results['vib_temperature'] = freq_au * au2hz * nist.PLANCK / nist.BOLTZMANN
+
+        # force constants
+        dyne = 1e-2 * nist.HARTREE2J / nist.BOHR_SI**2
+        results['force_const_au'] = force_const_au
+        results['force_const_dyne'] = reduced_mass * force_const_au * dyne  #cm^-1/a0^2
+
+        #TODO: IR intensity
+        return results
 
 
 from pyscf.neo import CDFT
