@@ -94,12 +94,22 @@ class HF(SCF):
         self.restrict = restrict
         if restrict == True:
             self.mf_elec = scf.RHF(self.mol.elec)
+            self.dm_elec = self.mf_elec.get_init_guess(key='1e')
         else:
             self.mf_elec = scf.UHF(self.mol.elec)
-            #self.dm0_elec = init_guess_mixed(self.mol.elec)
+            self.dm_elec = init_guess_mixed(self.mol.elec)
 
-        self.dm0_elec = self.mf_elec.get_init_guess(key='1e')
         self.mf_elec.get_hcore = self.get_hcore_elec
+
+        # set up the Hamiltonian for each quantum nucleus
+        self.mf_nuc = [None] * self.mol.nuc_num
+        for i in range(len(self.mol.nuc)):
+            self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
+            self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
+            self.mf_nuc[i].get_hcore = self.get_hcore_nuc
+            self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
+            self.mf_nuc[i].nuc_state = 0
+            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
 
     def get_hcore_nuc(self, mole):
         'get the core Hamiltonian for quantum nucleus.'
@@ -126,28 +136,28 @@ class HF(SCF):
 
         return h
 
-    def get_occ_nuc(self, nuc_energy=None, nuc_coeff=None):
-        'label the occupation for quantum nucleus'
+    def get_occ_nuc(self, mf_nuc):
+        def get_occ(nuc_energy=None, nuc_coeff=None):
+            'label the occupation for quantum nucleus'
 
-        e_idx = numpy.argsort(nuc_energy)
-        e_sort = nuc_energy[e_idx]
-        nuc_occ = numpy.zeros(nuc_energy.size)
-        #nocc = self.mol.nuc_num
-        nocc = 1
-        nuc_occ[e_idx[:nocc]] = 1
+            e_idx = numpy.argsort(nuc_energy)
+            nuc_occ = numpy.zeros(nuc_energy.size)
+            nuc_occ[e_idx[mf_nuc.nuc_state]] = 1
 
-        return nuc_occ
+            return nuc_occ
+        return get_occ
 
-    def get_init_guess_nuc(self, mole, key=None):
+    def get_init_guess_nuc(self, mf_nuc, key=None):
         '''Generate initial guess density matrix for quantum nuclei from core hamiltonian
 
            Returns:
             Density matrix, 2D ndarray
         '''
-        h1n = self.get_hcore_nuc(mole)
-        s1n = mole.intor_symmetric('int1e_ovlp')
+        mol = mf_nuc.mol
+        h1n = self.get_hcore_nuc(mol)
+        s1n = mol.intor_symmetric('int1e_ovlp')
         nuc_energy, nuc_coeff = scf.hf.eig(h1n, s1n)
-        nuc_occ = self.get_occ_nuc(nuc_energy, nuc_coeff)
+        nuc_occ = mf_nuc.get_occ(nuc_energy, nuc_coeff)
 
         return scf.hf.make_rdm1(nuc_coeff, nuc_occ)
     
@@ -245,32 +255,19 @@ class HF(SCF):
         return E_tot
 
 
-    def scf(self, conv_tol = 1e-7, max_cycle = 60, dm0_elec = None, dm0_nuc = None):
+    def scf(self, conv_tol = 1e-7, max_cycle = 60):
         'self-consistent field driver for NEO'
 
-        self.dm_elec = self.mf_elec.init_guess_by_atom()
-
-        # set up the Hamiltonian for each quantum nucleus
-        self.mf_nuc = [None] * self.mol.nuc_num
-        for i in range(len(self.mol.nuc)):
-            self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
-            self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
-            self.mf_nuc[i].get_hcore = self.get_hcore_nuc
-            self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
-            self.mf_nuc[i].get_occ = self.get_occ_nuc
-            self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
-
-        self.mf_elec.scf(self.dm0_elec)
+        self.mf_elec.scf(self.dm_elec)
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
-            self.mf_nuc[i].kernel(dump_chk=False)
+            #nuc_occ = numpy.zeros(self.mf_nuc[i].mol.nao_nr())
+            #nuc_occ[self.mf_nuc[i].nuc_state] = 1 
+            #self.mf_nuc[i].get_occ = lambda *args: nuc_occ # test: need to sort energy? 
+            self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
+            self.mf_nuc[i].scf(self.dm_nuc[i], dump_chk=False)
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
-
-        # update density matrix for electrons and quantum nuclei
-        #self.dm_elec = self.mf_elec.make_rdm1()
-        #for i in range(len(self.mf_nuc)):
-        #    self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
@@ -284,19 +281,15 @@ class HF(SCF):
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            self.mf_elec.scf(self.dm0_elec)
+            self.mf_elec.scf(self.dm_elec)
             self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
-                self.mf_nuc[i].kernel(dump_chk=False)
+                self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=False)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
-
-            # update density matrix for electrons and quantum nuclei
-            #self.dm_elec = self.mf_elec.make_rdm1()
-            #for i in range(len(self.mf_nuc)):
-            #    self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             logger.info(self, 'Cycle %i Total Energy of NEO: %s\n' %(cycle, E_tot))
+
             if abs(E_tot - E_last) < conv_tol:
                 scf_conv = True
                 logger.debug(self, 'The eigenvalues of the electrons:\n%s', self.mf_elec.mo_energy)

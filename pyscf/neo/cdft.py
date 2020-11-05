@@ -21,9 +21,14 @@ class CDFT(KS):
         KS.__init__(self, mol, restrict)
         self.mol = mol
         self.scf = self.inner_scf
-        self.xc = 'b3lyp'
-        self.mf_elec.xc = self.xc # test 
         self.f = [numpy.zeros(3)] * self.mol.natm
+
+        # set up the Hamiltonian for each quantum nuclei in cNEO
+        for i in range(len(self.mol.nuc)):
+            mf = self.mf_nuc[i]
+            mf.nuclei_expect_position = mf.mol.atom_coord(mf.mol.atom_index)
+            mf.get_hcore = self.get_hcore_nuc
+            #self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
 
     def get_hcore_nuc(self, mol):
         'get the core Hamiltonian for quantum nucleus in cNEO'
@@ -199,36 +204,22 @@ class CDFT(KS):
             return self.f
 
 
-    def inner_scf(self, conv_tol = 1e-8, max_cycle = 20, dm0_elec = None, opt_method = 'hybr', **kwargs):
+    def inner_scf(self, conv_tol = 1e-8, max_cycle = 20, opt_method = 'hybr', **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
 
         self.mf_elec.conv_tol = conv_tol * 0.1
-        # set up the Hamiltonian for each quantum nuclei in cNEO
-        self.mf_nuc = [] 
-        for i in range(len(self.mol.nuc)):
-            mf = scf.RHF(self.mol.nuc[i])
-            mf.nuclei_expect_position = mf.mol.atom_coord(mf.mol.atom_index)
-            mf.get_init_guess = self.get_init_guess_nuc
-            mf.get_hcore = self.get_hcore_nuc
-            mf.get_veff = self.get_veff_nuc_bare
-            mf.get_occ = self.get_occ_nuc
-            mf.conv_tol = conv_tol * 0.1
-            self.mf_nuc.append(mf)
-            self.dm_nuc[i] = self.get_init_guess_nuc(self.mol.nuc[i])
-        
-        if dm0_elec is None:
-            dm0_elec = self.dm0_elec
 
-        self.mf_elec.kernel(dm0_elec, dump_chk=None)
+        self.mf_elec.kernel(self.dm_elec, dump_chk=None)
         self.dm_elec = self.mf_elec.make_rdm1()
 
         if self.restrict == False: # use stability analysis to make initial electronic density matrix
             mo = self.mf_elec.stability()[0]
-            dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
+            self.dm_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
             self.mf_elec.max_cycle = 200
 
         for i in range(len(self.mol.nuc)):
-            self.mf_nuc[i].kernel(dump_chk=None)
+            self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
+            self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=None)
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
@@ -241,11 +232,11 @@ class CDFT(KS):
             cycle += 1
             E_last = E_tot
 
-            self.mf_elec.kernel(dm0_elec, dump_chk=None)
+            self.mf_elec.kernel(self.dm_elec, dump_chk=None)
             self.dm_elec = self.mf_elec.make_rdm1()
             if self.restrict == False:
                 mo = self.mf_elec.stability()[0]
-                dm0_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
+                self.dm_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
                 self.mf_elec.max_cycle = 200
 
             #if cycle >= 1: # using pre-converged density can be more stable
@@ -257,7 +248,7 @@ class CDFT(KS):
                 self.f[index] = opt.x
                 logger.info(self, 'f of %s(%i) atom: %s' %(self.mol.atom_symbol(index), index, self.f[index]))
                 logger.info(self, '1st de of L: %s', opt.fun)
-                self.mf_nuc[i].kernel(dump_chk=None)
+                self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=None)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
