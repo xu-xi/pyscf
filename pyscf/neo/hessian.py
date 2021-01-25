@@ -182,18 +182,18 @@ class Hessian(lib.StreamObject):
 
             for j0 in range(i0+1):
                 ja = self.atmlst[j0]
-                if ia == index:
-                    de2[i0, j0] -= f1[ja]
+                #if ia == index: # test
+                #    de2[i0, j0] -= f1[ja]
                
                 dm1_n = numpy.einsum('ypi,qi->ypq', mo1_n[ja], mocc)
 
                 de2[i0, j0] += numpy.einsum('xpq,ypq->xy', h1a, dm1_n)*2 # *2 for c.c. of dm1
 
                 r1a_f = numpy.einsum('xypq, y->xpq', r1a, self.base.f[index])
-                de2[i0, j0] += numpy.einsum('xpq,ypq->xy', r1a_f, dm1_n)*2
+                de2[i0, j0] += numpy.einsum('xpq,ypq->xy', r1a_f, dm1_n)*2 
 
                 r1a_dm = numpy.einsum('xzpq, pq->xz', r1a, dm0_n)
-                de2[i0, j0] += numpy.einsum('xz, zy->xy', r1a_dm, f1[ja]) # test: yz or zy?
+                #de2[i0, j0] += numpy.einsum('xz, zy->xy', r1a_dm, f1[ja]) # test: yz or zy?
 
                 dm1_n = numpy.einsum('ypi,qi,i->ypq', mo1_n[ja], mocc, mo_energy[mo_occ>0])
                 de2[i0, j0] -= numpy.einsum('xpq,ypq->xy', s1ao, dm1_n)*2
