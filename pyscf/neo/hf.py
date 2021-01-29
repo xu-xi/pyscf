@@ -110,29 +110,31 @@ class HF(SCF):
             self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
             self.mf_nuc[i].nuc_state = 0
             self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
+            self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
 
     def get_hcore_nuc(self, mole):
         'get the core Hamiltonian for quantum nucleus.'
 
-        i = mole.atom_index
-        mass = 1836.15267343 * self.mol.mass[i] # the mass of quantum nucleus in a.u.
+        ia = mole.atom_index
+        mass = 1836.15267343 * self.mol.mass[ia] # the mass of quantum nucleus in a.u.
+        charge = self.mol.atom_charge(ia)
 
         h = mole.intor_symmetric('int1e_kin')/mass
-        h -= mole.intor_symmetric('int1e_nuc')*self.mol._atm[i,0] # times nuclear charge
+        h -= mole.intor_symmetric('int1e_nuc')*charge
 
         # Coulomb interactions between quantum nucleus and electrons
         if isinstance(self.dm_elec, numpy.ndarray):
             if self.restrict == False: # unrestricted case
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4')*charge
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4')*charge
             else:
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
+                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')*charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
-            k = self.mol.nuc[j].atom_index
-            if k != i and isinstance(self.dm_nuc[j], numpy.ndarray):
-                h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]), self.dm_nuc[j], scripts='ijkl,lk->ij') * self.mol._atm[i, 0] * self.mol._atm[k, 0] # times nuclear charge
+            ja = self.mol.nuc[j].atom_index
+            if ja != ia and isinstance(self.dm_nuc[j], numpy.ndarray):
+                h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]), self.dm_nuc[j], scripts='ijkl,lk->ij')*charge*self.mol.atom_charge(ja)
 
         return h
 
@@ -169,8 +171,10 @@ class HF(SCF):
         j = 0
         # Coulomb interactions between electrons and all quantum nuclei
         for i in range(len(self.dm_nuc)):
+            ia = self.mol.nuc[i].atom_index
+            charge = self.mol.atom_charge(ia)
             if isinstance(self.dm_nuc[i], numpy.ndarray):
-                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]), self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * self.mol._atm[self.mol.nuc[i].atom_index, 0]
+                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]), self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
 
         return scf.hf.get_hcore(mole) + j
 
@@ -179,7 +183,7 @@ class HF(SCF):
         return numpy.zeros((mol.nao_nr(), mol.nao_nr()))
 
     def get_veff_nuc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
-        'get the HF effective potential for quantum nuclei in NEO'
+        'get the HF effective potential for quantum nuclei in NEO (not used)'
 
         Z2 = self.mol._atm[mol.atom_index, 0]**2
 
@@ -196,7 +200,11 @@ class HF(SCF):
         mol = self.mol
         jcross = 0
         for i in range(len(dm_nuc)):
-            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * mol._atm[mol.nuc[i].atom_index, 0]
+            ia = mol.nuc[i].atom_index
+            charge = mol.atom_charge(ia)
+
+            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
+
         if self.restrict == False:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
         else:
@@ -209,31 +217,32 @@ class HF(SCF):
         mol = self.mol
         E = 0
         for i in range(len(dm_nuc)):
+            ia = mol.nuc[i].atom_index
             for j in range(len(dm_nuc)):
                 if j != i:
-                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]), dm_nuc[j], scripts='ijkl,lk->ij', aosym='s4') * mol._atm[mol.nuc[i].atom_index, 0] * mol._atm[mol.nuc[j].atom_index, 0]
+                    ja = mol.nuc[j].atom_index
+                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]), dm_nuc[j], scripts='ijkl,lk->ij', aosym='s4') * mol.atom_charge(ia)*mol.atom_charge(ja)
                     E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
 
         logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E*.5) # double counted
         return E*.5 
 
-    def energy_tot(self, mf_elec, mf_nuc):
+    def energy_tot(self):
         'Total energy of NEO'
-        mol = self.mol
         E_tot = 0
 
-        self.dm_elec = mf_elec.make_rdm1()
-        for i in range(len(mf_nuc)):
-            self.dm_nuc[i] = mf_nuc[i].make_rdm1()
+        self.dm_elec = self.mf_elec.make_rdm1()
+        for i in range(len(self.mf_nuc)):
+            self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
-        h1e = mf_elec.get_hcore(mf_elec.mol)
+        h1e = self.mf_elec.get_hcore(self.mf_elec.mol)
         if self.restrict == False:
             e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0] + self.dm_elec[1])
         else:
             e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
         logger.debug(self, 'Energy of e1: %s', e1)
 
-        vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
+        vhf = self.mf_elec.get_veff(self.mf_elec.mol, self.dm_elec)
         if self.restrict == False:
             e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) +
                     numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5 
@@ -241,16 +250,16 @@ class HF(SCF):
             e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec)
         logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
 
-        E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
+        E_tot += self.mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
 
-        for i in range(len(mf_nuc)):
-            index = mf_nuc[i].mol.atom_index
-            h1n = mf_nuc[i].get_hcore(mf_nuc[i].mol)
+        for i in range(len(self.mf_nuc)):
+            index = self.mf_nuc[i].mol.atom_index
+            h1n = self.mf_nuc[i].get_hcore(self.mf_nuc[i].mol)
             n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
             logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(index), n1)
             E_tot += n1
 
-        E_tot =  E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + mf_elec.energy_nuc() # substract repeatedly counted terms
+        E_tot =  E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + self.mf_elec.energy_nuc() # substract repeatedly counted terms
 
         return E_tot
 
@@ -265,11 +274,11 @@ class HF(SCF):
             #nuc_occ = numpy.zeros(self.mf_nuc[i].mol.nao_nr())
             #nuc_occ[self.mf_nuc[i].nuc_state] = 1 
             #self.mf_nuc[i].get_occ = lambda *args: nuc_occ # test: need to sort energy? 
-            self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
+            #self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
             self.mf_nuc[i].scf(self.dm_nuc[i], dump_chk=False)
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
-        E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
+        E_tot = self.energy_tot()
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
 
         scf_conv = False
@@ -287,7 +296,7 @@ class HF(SCF):
                 self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=False)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
-            E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
+            E_tot = self.energy_tot()
             logger.info(self, 'Cycle %i Total Energy of NEO: %s\n' %(cycle, E_tot))
 
             if abs(E_tot - E_last) < conv_tol:
