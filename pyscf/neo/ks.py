@@ -35,7 +35,7 @@ class KS(HF):
 
         # build grids (Note: high density grids are needed since nuclei is more localized)
         self.mf_elec.grids.level = 3
-        self.mf_elec.grids.build(with_non0tab = True)
+        self.mf_elec.grids.build(with_non0tab = False)
 
         # set up the Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
@@ -84,7 +84,7 @@ class KS(HF):
 
         return exc, vxc
             
-    def get_veff_nuc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1, vhfopt=None):
+    def get_veff_nuc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
         'get the effective potential for proton of NEO-DFT'
 
         nao = mol.nao_nr()
@@ -100,10 +100,10 @@ class KS(HF):
         aow = None
         for ao, mask, weight, coords in ni.block_loop(mol, grids, nao):
             aow = numpy.ndarray(ao.shape, order='F', buffer=aow)
-            ao_elec = eval_ao(self.mol.elec, coords, non0tab=mask)
-            rho_elec = eval_rho(self.mol.elec, ao_elec, self.dm_elec, non0tab=mask)
-            ao_nuc = eval_ao(mol, coords, non0tab=mask)
-            rho_nuc = eval_rho(mol, ao_nuc, dm, non0tab=mask)
+            ao_elec = eval_ao(self.mol.elec, coords)
+            rho_elec = eval_rho(self.mol.elec, ao_elec, self.dm_elec)
+            ao_nuc = eval_ao(mol, coords)
+            rho_nuc = eval_rho(mol, ao_nuc, dm)
 
             exc, vxc = self.eval_xc_nuc(rho_elec, rho_nuc)
             den = rho_nuc * weight
@@ -117,7 +117,7 @@ class KS(HF):
         vmat = lib.tag_array(vmat, exc=excsum, ecoul=0, vj=0, vk=0)
         return vmat
 
-    def get_veff_elec(self, mol, dm, dm_last=0, vhf_last=0, hermi=1):
+    def get_veff_elec(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
         'get the effective potential for electrons of NEO-DFT'
 
         nao = mol.nao_nr()
@@ -135,10 +135,10 @@ class KS(HF):
             if self.mol.atom_symbol(ia) == 'H':
                 for ao, mask, weight, coords in ni.block_loop(mol, grids, nao):
                     aow = numpy.ndarray(ao.shape, order='F', buffer=aow)
-                    ao_elec = eval_ao(mol, coords, non0tab=mask)
-                    rho_elec = eval_rho(mol, ao_elec, dm, non0tab=mask)
-                    ao_nuc = eval_ao(self.mol.nuc[i], coords, non0tab=mask)
-                    rho_nuc = eval_rho(self.mol.nuc[i], ao_nuc, self.dm_nuc[i], non0tab=mask)
+                    ao_elec = eval_ao(mol, coords)
+                    rho_elec = eval_rho(mol, ao_elec, dm)
+                    ao_nuc = eval_ao(self.mol.nuc[i], coords)
+                    rho_nuc = eval_rho(self.mol.nuc[i], ao_nuc, self.dm_nuc[i])
 
                     exc_i, vxc_i = self.eval_xc_elec(rho_elec, rho_nuc)
                     den = rho_elec * weight
