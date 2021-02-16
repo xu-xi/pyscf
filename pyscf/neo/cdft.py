@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 
+'''
+Constrained nuclear-electronic orbital density functional theory
+'''
 import sys, numpy, scipy, copy
 from pyscf import scf
 from pyscf import gto
 from pyscf import dft 
 from pyscf.neo.ks import KS
 from pyscf.lib import logger
+from pyscf.data import nist
 
 class CDFT(KS):
     '''
@@ -17,11 +21,13 @@ class CDFT(KS):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol, restrict=True):
-        KS.__init__(self, mol, restrict)
-        self.mol = mol
+    def __init__(self, mol):
+        KS.__init__(self, mol)
         self.scf = self.inner_scf
         self.f = [numpy.zeros(3)] * self.mol.natm
+
+    def build(self):
+        KS.build(self)
 
         # set up the Hamiltonian for each quantum nuclei in cNEO
         for i in range(len(self.mol.nuc)):
@@ -32,29 +38,28 @@ class CDFT(KS):
 
     def get_hcore_nuc(self, mol):
         'get the core Hamiltonian for quantum nucleus in cNEO'
-        i = mol.atom_index
-        mass = 1836.15267343 * self.mol.mass[i] # the mass of quantum nucleus in a.u.
+        ia = mol.atom_index
+        mass = self.mol.mass[ia] * nist.ATOMIC_MASS/nist.E_MASS # the mass of quantum nucleus in a.u.
+        charge = self.mol.atom_charge(ia)
 
         h = mol.intor_symmetric('int1e_kin')/mass
-        h -= mol.intor_symmetric('int1e_nuc')*self.mol._atm[i,0] # times nuclear charge
+        h -= mol.intor_symmetric('int1e_nuc')*charge
 
         # Coulomb interactions between quantum nucleus and electrons
-        if self.dm_elec is not None:
-            if self.restrict == True:
-                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * self.mol._atm[i,0]
-            else:
-                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
-                h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * self.mol._atm[i,0]
-
+        if self.unrestricted == True:
+            h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4')*charge
+            h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4')*charge
+        else:
+            h -= scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4')*charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
-            k = self.mol.nuc[j].atom_index
-            if k != i and isinstance(self.dm_nuc[j], numpy.ndarray):
-                h += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.dm_nuc[j], scripts='ijkl,lk->ij') * self.mol._atm[i, 0] * self.mol._atm[k, 0] # times nuclear charge
+            ja = self.mol.nuc[j].atom_index
+            if ja != ia and isinstance(self.dm_nuc[j], numpy.ndarray):
+                h += scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.dm_nuc[j], scripts='ijkl,lk->ij')*charge*self.mol.atom_charge(ja) # times nuclear charge
 
         # extra term in cNEO due to the constraint on expectational position
-        h += numpy.einsum('xij,x->ij', mol.intor_symmetric('int1e_r', comp=3), self.f[i])
+        h += numpy.einsum('xij,x->ij', mol.intor_symmetric('int1e_r', comp=3), self.f[ia])
 
         return h
 
@@ -104,31 +109,21 @@ class CDFT(KS):
             self.dm_nuc[i] = mf_nuc[i].make_rdm1()
 
         h1e = mf_elec.get_hcore(mf_elec.mol)
-        if self.restrict == True:
-            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
-        else:
-            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0]+self.dm_elec[1])
-
-        logger.debug(self, 'Energy of e1: %s', e1)
-
         vhf = mf_elec.get_veff(mf_elec.mol, self.dm_elec)
-        if self.restrict == True:
-            e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec) * .5
-        else:
-            e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) + 
-                    numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5
-        logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
-
         E_tot += mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
 
         for i in range(len(mf_nuc)):
-            index = mf_nuc[i].mol.atom_index
+            ia = mf_nuc[i].mol.atom_index
             h1n = mf_nuc[i].get_hcore(mf_nuc[i].mol)
             n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
-            logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(index), n1)
+            logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(ia), n1)
             E_tot += n1
-            h_r = numpy.einsum('xij,x->ij', mf_nuc[i].mol.intor_symmetric('int1e_r', comp=3), self.f[index])
+            h_r = numpy.einsum('xij,x->ij', mf_nuc[i].mol.intor_symmetric('int1e_r', comp=3), self.f[ia])
             E_tot -= numpy.einsum('ij,ji', h_r, self.dm_nuc[i])
+
+            if self.mol.atom_symbol(ia) == 'H' and self.epc is not None:
+                veff = self.mf_nuc[i].get_veff(self.mf_nuc[i].mol, self.dm_nuc[i])
+                E_tot += veff.exc
 
         E_tot = E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + mf_elec.energy_nuc() # substract repeatedly counted terms
 
@@ -206,13 +201,13 @@ class CDFT(KS):
 
     def inner_scf(self, conv_tol = 1e-8, max_cycle = 20, opt_method = 'hybr', **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
-
-        self.mf_elec.conv_tol = conv_tol * 0.1
+        
+        self.build()
 
         self.mf_elec.kernel(self.dm_elec, dump_chk=None)
         self.dm_elec = self.mf_elec.make_rdm1()
 
-        if self.restrict == False: # use stability analysis to make initial electronic density matrix
+        if self.unrestricted == True: # use stability analysis to make initial electronic density matrix
             mo = self.mf_elec.stability()[0]
             self.dm_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
             self.mf_elec.max_cycle = 200
@@ -225,16 +220,18 @@ class CDFT(KS):
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
 
-        self.converged = False
         cycle = 0
 
-        while not self.converged and cycle < max_cycle:
+        while not self.converged:
             cycle += 1
+            if cycle > max_cycle:
+                raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
+
             E_last = E_tot
 
             self.mf_elec.kernel(self.dm_elec, dump_chk=None)
             self.dm_elec = self.mf_elec.make_rdm1()
-            if self.restrict == False:
+            if self.unrestricted == True:
                 mo = self.mf_elec.stability()[0]
                 self.dm_elec = self.mf_elec.make_rdm1(mo, self.mf_elec.mo_occ)
                 self.mf_elec.max_cycle = 200

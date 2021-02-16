@@ -46,7 +46,7 @@ class Mole(gto.mole.Mole):
         else:
             beta = math.sqrt(3)
             n = 12
-
+        
         # even-tempered basis 
         basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
         logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
@@ -87,10 +87,12 @@ class Mole(gto.mole.Mole):
 
         self.mass = self.atom_mass_list(isotope_avg=True)
         for i in range(len(self.mass)):
-            if self.atom_symbol(i) == 'H@2': # Deuterium
+            if self.atom_symbol(i) == 'H@2': # Deuterium (from Wikipedia)
                 self.mass[i] = 2.01410177811
-            elif self.atom_symbol(i) == 'H@0': # Muonium
+            elif self.atom_symbol(i) == 'H@0': # Muonium (TODO: precise mass)
                 self.mass[i] = 0.114
+            elif self.atom_symbol(i) == 'H': # Proton (from Wikipedia)
+                self.mass[i] = 1.007276466621
 
         self.elec = self.elec_mole()
         self.nuc = []

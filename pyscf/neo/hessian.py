@@ -6,6 +6,7 @@ Analytical Hessian for constrained nuclear-electronic orbitals
 import numpy
 from pyscf import lib
 from pyscf import scf
+from pyscf.lib import logger
 from pyscf.data import nist
 from pyscf.hessian.thermo import _get_TR, rotation_const, _get_rotor_type
 from pyscf.neo.cphf import CPHF
@@ -29,6 +30,10 @@ class Hessian(lib.StreamObject):
         self.mol = scf_method.mol
         self.base = scf_method
         self.atmlst = range(self.mol.natm)
+        self.verbose = 4
+        if self.base.epc is not None:
+            raise NotImplementedError('The gradient with epc is not implemented')
+
 
     def hess_elec(self, mo1_e, e1_e):
         'Hessian of electrons and classic nuclei in cNEO'
@@ -163,7 +168,7 @@ class Hessian(lib.StreamObject):
             s1oo = numpy.zeros((3, nocc, nocc))
 
             if ia == index:
-                h1a = -mf_nuc.mol.intor('int1e_ipkin', comp=3)/(1836.15267343 * self.mol.mass[index])
+                h1a = -mf_nuc.mol.intor('int1e_ipkin', comp=3)/(self.mol.mass[index]*nist.ATOMIC_MASS/nist.E_MASS)
                 h1a += mf_nuc.mol.intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(index)
                 h1a += h1a.transpose(0, 2, 1)
 
@@ -212,7 +217,7 @@ class Hessian(lib.StreamObject):
         dm0_n = self.base.dm_nuc[i]
         index = mf_nuc.mol.atom_index
         i = self.atmlst.index(index)
-        mass = 1836.15267343 * self.mol.mass[index]
+        mass = self.mol.mass[index] * nist.ATOMIC_MASS/nist.E_MASS
         charge = self.mol.atom_charge(index)
                 
         mo_energy = mf_nuc.mo_energy
@@ -372,7 +377,8 @@ class Hessian(lib.StreamObject):
         e1_e = e1_e.reshape(-1, 3, nocc_e, nocc_e)
 
         hess = self.hess_elec(mo1_e = mo1_e, e1_e = e1_e)
-        print('hess_elec', hess)
+        logger.debug(self, 'hess_elec:\n%s', hess)
+
         for i in range(len(self.mol.nuc)):
             mo_coeff_n = self.base.mf_nuc[i].mo_coeff
             mo_occ_n = self.base.mf_nuc[i].mo_occ
@@ -386,20 +392,20 @@ class Hessian(lib.StreamObject):
             f1[i] = f1[i].reshape(-1, 3, 3)
 
             hess += self.hess_elec_nuc1(i, mo1_n[i], mo1_e)
-            print('elec_nuc1', self.hess_elec_nuc1(i, mo1_n[i], mo1_e))
+            logger.debug(self, 'elec_nuc1:\n%s', self.hess_elec_nuc1(i, mo1_n[i], mo1_e))
             hess += self.hess_elec_nuc2(i)
-            print('elec_nuc2', self.hess_elec_nuc2(i))
+            logger.debug(self, 'elec_nuc2:\n%s', self.hess_elec_nuc2(i))
             hess += self.hess_nuc1(i, mo1_n[i], e1_n[i], f1[i])
-            print('hess_nuc1', self.hess_nuc1(i, mo1_n[i], e1_n[i], f1[i]))
+            logger.debug(self, 'hess_nuc1:\n%s', self.hess_nuc1(i, mo1_n[i], e1_n[i], f1[i]))
             hess += self.hess_nuc2(i)
-            print('hess_nuc2', self.hess_nuc2(i))
+            logger.debug(self, 'hess_nuc2:\n%s', self.hess_nuc2(i))
 
         hess += self.hess_nuc_nuc1(mo1_n)
-        print('hess_nuc_nuc1', self.hess_nuc_nuc1(mo1_n))
+        logger.debug(self, 'hess_nuc_nuc1:\n%s', self.hess_nuc_nuc1(mo1_n))
         hess += self.hess_nuc_nuc2()
-        print('hess_nuc_nuc2', self.hess_nuc_nuc2())
+        logger.debug(self, 'hess_nuc_nuc2:\n%s', self.hess_nuc_nuc2())
 
-        print('hess', hess)
+        logger.note(self, 'hess:\n%s', hess)
         return hess
 
     def harmonic_analysis(self, mol, hess, exclude_trans=True, exclude_rot=True,

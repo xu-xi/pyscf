@@ -11,6 +11,7 @@ from pyscf import lib
 from pyscf.lib import logger
 from pyscf.neo import Mole, CDFT
 from pyscf.grad.rhf import _write
+from pyscf.data import nist
 
 class Gradients(lib.StreamObject):
     '''
@@ -32,6 +33,8 @@ class Gradients(lib.StreamObject):
         self.scf = scf_method
         self.verbose = 4
         self.grad = self.kernel
+        if self.base.epc is not None:
+            raise NotImplementedError('The gradient with epc is not implemented')
 
     #as_scanner = grad.rhf.as_scanner
 
@@ -44,7 +47,7 @@ class Gradients(lib.StreamObject):
     def get_hcore(self, mol):
         'part of the gradients of core Hamiltonian of quantum nucleus'
         i = mol.atom_index
-        mass = 1836.15267343 * self.mol.mass[i]
+        mass = self.mol.mass[i] * nist.ATOMIC_MASS/nist.E_MASS
         h = -mol.intor('int1e_ipkin', comp=3)/mass # minus sign for the derivative is taken w.r.t 'r' instead of 'R'
         h += mol.intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(i)
         return h
@@ -69,10 +72,10 @@ class Gradients(lib.StreamObject):
     def grad_jcross_nuc_elec(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
         i = mol.atom_index
-        if self.scf.restrict == True:
-            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
-        else:
+        if self.scf.unrestricted == True:
             jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
+        else:
+            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
 
         return jcross
 
@@ -109,10 +112,11 @@ class Gradients(lib.StreamObject):
             p0, p1 = aoslices[ia, 2:]
             jcross_elec_nuc = self.grad_jcross_elec_nuc()
             # *2 for c.c.
-            if self.scf.restrict == True:
-                self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[p0:p1])*2
-            else:
+            if self.scf.unrestricted == True:
                 self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[0][p0:p1] + self.scf.dm_elec[1][p0:p1])*2
+            else:
+                self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[p0:p1])*2
+
             if self.mol.quantum_nuc[ia] == True:
                 for i in range(len(self.mol.nuc)):
                     if self.mol.nuc[i].atom_index == ia:

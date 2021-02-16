@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
 '''
-Non-relativistic restricted Kohn-Sham for NEO-DFT
+Non-relativistic Kohn-Sham for NEO-DFT
 '''
 import numpy
-from pyscf import dft, lib
+from pyscf import scf, dft, lib
 from pyscf.lib import logger
 from pyscf.dft.numint import eval_ao, eval_rho, _scale_ao, _dot_ao_ao
 from pyscf.neo.hf import HF
@@ -20,42 +20,69 @@ class KS(HF):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol, restrict=True):
-        HF.__init__(self, mol, restrict)
-        
-        if restrict == True:
-            self.mf_elec = dft.RKS(mol.elec)
-        else:
+    def __init__(self, mol):
+        HF.__init__(self, mol)
+
+        if self.unrestricted == True:
             self.mf_elec = dft.UKS(mol.elec)
+        else:
+            self.mf_elec = dft.RKS(mol.elec)
 
-        self.mf_elec.get_hcore = self.get_hcore_elec
-        self.mf_elec.get_veff = self.get_veff_elec
         self.mf_elec.xc = 'b3lyp' # use b3lyp as the default xc functional for electrons
-        self.dm_elec = self.mf_elec.get_init_guess(key='1e')
+        self.epc = None # '17-1' or '17-2' can be used
 
-        # build grids (Note: high density grids are needed since nuclei is more localized)
-        self.mf_elec.grids.level = 3
+
+    def build(self):
+        'build the Hamiltonian for NEO-DFT'
+        
+        self.mf_elec.get_hcore = self.get_hcore_elec
+        if self.epc is not None:
+            self.mf_elec.get_veff = self.get_veff_elec_epc
+
+        # build grids (Note: high-density grids are needed since nuclei is more localized than electrons)
         self.mf_elec.grids.build(with_non0tab = False)
+
+        # pre-scf for electronic density
+        if self.unrestricted == True:
+            mf = dft.UKS(self.mol)
+        else:
+            mf = dft.RKS(self.mol)
+
+        mf.xc = self.mf_elec.xc
+        mf.scf(dump_chk=False)
+        self.dm_elec = mf.make_rdm1()
 
         # set up the Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
             ia = self.mol.nuc[i].atom_index
-            if self.mol.atom_symbol(ia) == 'H': # only support electron-proton correlation
+            if self.mol.atom_symbol(ia) == 'H' and self.epc is not None: # only support electron-proton correlation
                 self.mf_nuc[i] = dft.RKS(self.mol.nuc[i])
-                self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
-                self.mf_nuc[i].get_hcore = self.get_hcore_nuc
-                self.mf_nuc[i].nuc_state = 0
-                self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
-                self.mf_nuc[i].get_veff = self.get_veff_nuc
+                self.mf_nuc[i].get_veff = self.get_veff_nuc_epc
+                self.mf_nuc[i].conv_tol = 1e-8
 
+                #self.mf_nuc[i].verbose = self.verbose
+            else:
+                self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
+                self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
+
+            self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
+            self.mf_nuc[i].get_hcore = self.get_hcore_nuc
+            self.mf_nuc[i].nuc_state = 0
+            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
+
 
     def eval_xc_nuc(self, rho_e, rho_n):
         'evaluate e_xc and v_xc of proton on a grid (epc17)'
         a = 2.35
         b = 2.4
-        #c = 3.2
-        c = 6.6
+
+        if self.epc == '17-1':
+            c = 3.2 #TODO solve the convergence issue for epc17-1
+        elif self.epc == '17-2':
+            c = 6.6
+        else:
+            raise ValueError('Unsupported type of epc %s', self.epc)
 
         rho_product = numpy.multiply(rho_e, rho_n)
         denominator = a - b*numpy.sqrt(rho_product) + c*rho_product
@@ -71,8 +98,13 @@ class KS(HF):
         'evaluate e_xc and v_xc of electrons on a grid (only the epc part)'
         a = 2.35
         b = 2.4
-        #c = 3.2
-        c = 6.6
+
+        if self.epc == '17-1':
+            c = 3.2 #TODO solve the convergence issue for epc17-1
+        elif self.epc == '17-2':
+            c = 6.6
+        else:
+            raise ValueError('Unsupported type of epc %s', self.epc)
 
         rho_product = numpy.multiply(rho_e, rho_n)
         denominator = a - b*numpy.sqrt(rho_product) + c*rho_product
@@ -84,7 +116,8 @@ class KS(HF):
 
         return exc, vxc
             
-    def get_veff_nuc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
+    def get_veff_nuc_epc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
+    #def nr_rks_nuc(self, mol, dm):
         'get the effective potential for proton of NEO-DFT'
 
         nao = mol.nao_nr()
@@ -94,7 +127,7 @@ class KS(HF):
         excsum = 0
         vmat = numpy.zeros((nao, nao))
 
-        grids = self.mf_elec.grids # beta: grids of nuc ?
+        grids = self.mf_elec.grids 
         ni = self.mf_elec._numint
         
         aow = None
@@ -117,7 +150,16 @@ class KS(HF):
         vmat = lib.tag_array(vmat, exc=excsum, ecoul=0, vj=0, vk=0)
         return vmat
 
-    def get_veff_elec(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
+    def get_veff_nuc2(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
+        # TODO DIIS for scf of quantum nucleus
+        if dm_last is None:
+            veff = self.nr_rks_nuc(mol, dm)
+        else:
+            ddm = numpy.asarray(dm) - numpy.asarray(dm_last)
+            veff = self.nr_rks_nuc(mol, ddm) + numpy.asarray(vhf_last)
+        return veff
+
+    def get_veff_elec_epc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
         'get the effective potential for electrons of NEO-DFT'
 
         nao = mol.nao_nr()
@@ -160,20 +202,8 @@ class KS(HF):
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         h1e = self.mf_elec.get_hcore(self.mf_elec.mol)
-        if self.restrict == False:
-            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0] + self.dm_elec[1])
-        else:
-            e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
-        logger.debug(self, 'Energy of e1: %s', e1)
-
         vhf = self.mf_elec.get_veff(self.mf_elec.mol, self.dm_elec)
-        if self.restrict == False:
-            e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) +
-                    numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5 
-        else:
-            e_coul = numpy.einsum('ij,ji', vhf, self.dm_elec)
-        logger.debug(self, 'Energy of e-e Coulomb interactions: %s', e_coul)
-
+       
         E_tot += self.mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
 
         for i in range(len(self.mf_nuc)):
@@ -182,7 +212,7 @@ class KS(HF):
             n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
             logger.debug(self, 'Energy of quantum nuclei %s: %s', self.mol.atom_symbol(ia), n1)
             E_tot += n1
-            if self.mol.atom_symbol(ia) == 'H':
+            if self.mol.atom_symbol(ia) == 'H' and self.epc is not None:
                 veff = self.mf_nuc[i].get_veff(self.mf_nuc[i].mol, self.dm_nuc[i])
                 E_tot += veff.exc
 

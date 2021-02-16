@@ -11,6 +11,7 @@ from pyscf import lib
 from pyscf.lib import logger
 from pyscf.scf import rhf
 from pyscf.scf.hf import SCF
+from pyscf.data import nist
 
 def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
     ''' Generate density matrix with broken spatial and spin symmetry by mixing
@@ -82,27 +83,29 @@ class HF(SCF):
     
     '''
 
-    def __init__(self, mol, restrict = True):
+    def __init__(self, mol, unrestricted = False):
         SCF.__init__(self, mol)
 
         self.mol = mol
         self.dm_elec = None
         self.dm_nuc = [None]*self.mol.nuc_num
+        self.mf_nuc = [None]*self.mol.nuc_num
         self.verbose = 4
+        self.unrestricted = unrestricted
 
+    def build(self):
+        'build the Hamiltonian for NEO-HF'
         # set up the Hamiltonian for electrons
-        self.restrict = restrict
-        if restrict == True:
-            self.mf_elec = scf.RHF(self.mol.elec)
-            self.dm_elec = self.mf_elec.get_init_guess(key='1e')
-        else:
+        if self.unrestricted == True:
             self.mf_elec = scf.UHF(self.mol.elec)
             self.dm_elec = init_guess_mixed(self.mol.elec)
+        else:
+            self.mf_elec = scf.RHF(self.mol.elec)
+            self.dm_elec = self.mf_elec.get_init_guess(key='1e')
 
         self.mf_elec.get_hcore = self.get_hcore_elec
 
         # set up the Hamiltonian for each quantum nucleus
-        self.mf_nuc = [None] * self.mol.nuc_num
         for i in range(len(self.mol.nuc)):
             self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
@@ -116,19 +119,18 @@ class HF(SCF):
         'get the core Hamiltonian for quantum nucleus.'
 
         ia = mole.atom_index
-        mass = 1836.15267343 * self.mol.mass[ia] # the mass of quantum nucleus in a.u.
+        mass = self.mol.mass[ia] * nist.ATOMIC_MASS/nist.E_MASS # the mass of quantum nucleus in a.u.
         charge = self.mol.atom_charge(ia)
 
         h = mole.intor_symmetric('int1e_kin')/mass
         h -= mole.intor_symmetric('int1e_nuc')*charge
 
         # Coulomb interactions between quantum nucleus and electrons
-        if isinstance(self.dm_elec, numpy.ndarray):
-            if self.restrict == False: # unrestricted case
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4')*charge
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4')*charge
-            else:
-                h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')*charge
+        if self.unrestricted == True:
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4')*charge
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4')*charge
+        else:
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4')*charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
@@ -156,7 +158,7 @@ class HF(SCF):
             Density matrix, 2D ndarray
         '''
         mol = mf_nuc.mol
-        h1n = self.get_hcore_nuc(mol)
+        h1n = self.get_hcore(mol)
         s1n = mol.intor_symmetric('int1e_ovlp')
         nuc_energy, nuc_coeff = scf.hf.eig(h1n, s1n)
         nuc_occ = mf_nuc.get_occ(nuc_energy, nuc_coeff)
@@ -205,7 +207,7 @@ class HF(SCF):
 
             jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
 
-        if self.restrict == False:
+        if self.unrestricted == True:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
         else:
             E = numpy.einsum('ij,ji', jcross, dm_elec)
@@ -236,14 +238,14 @@ class HF(SCF):
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         h1e = self.mf_elec.get_hcore(self.mf_elec.mol)
-        if self.restrict == False:
+        if self.unrestricted == True:
             e1 = numpy.einsum('ij,ji', h1e, self.dm_elec[0] + self.dm_elec[1])
         else:
             e1 = numpy.einsum('ij,ji', h1e, self.dm_elec)
         logger.debug(self, 'Energy of e1: %s', e1)
 
         vhf = self.mf_elec.get_veff(self.mf_elec.mol, self.dm_elec)
-        if self.restrict == False:
+        if self.unrestricted == True:
             e_coul = (numpy.einsum('ij,ji', vhf[0], self.dm_elec[0]) +
                     numpy.einsum('ij,ji', vhf[1], self.dm_elec[1])) * .5 
         else:
@@ -267,47 +269,44 @@ class HF(SCF):
     def scf(self, conv_tol = 1e-7, max_cycle = 60):
         'self-consistent field driver for NEO'
 
+        self.build()
+
         self.mf_elec.scf(self.dm_elec)
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
-            #nuc_occ = numpy.zeros(self.mf_nuc[i].mol.nao_nr())
-            #nuc_occ[self.mf_nuc[i].nuc_state] = 1 
-            #self.mf_nuc[i].get_occ = lambda *args: nuc_occ # test: need to sort energy? 
-            #self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
-            self.mf_nuc[i].scf(self.dm_nuc[i], dump_chk=False)
+            self.mf_nuc[i].scf(dm0=self.dm_nuc[i], dump_chk=False)
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot()
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
 
-        scf_conv = False
         cycle = 0
 
-        while not scf_conv:
+        while not self.converged:
             cycle += 1
             if cycle > max_cycle:
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            self.mf_elec.scf(self.dm_elec)
+            self.mf_elec.scf(dm0=self.dm_elec)
             self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
-                self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=False)
+                self.mf_nuc[i].scf(dm0=self.dm_nuc[i], dump_chk=False)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot()
             logger.info(self, 'Cycle %i Total Energy of NEO: %s\n' %(cycle, E_tot))
 
             if abs(E_tot - E_last) < conv_tol:
-                scf_conv = True
+                self.converged = True
                 logger.debug(self, 'The eigenvalues of the electrons:\n%s', self.mf_elec.mo_energy)
 
                 kinetic_energy = 0
                 for i in range(len(self.mf_nuc)):
                     logger.debug(self, 'The eigenvalues of the quantum nucleus:\n%s', self.mf_nuc[i].mo_energy)
                     logger.debug(self, 'The coefficents of the quantum nucleus:\n%s', self.mf_nuc[i].mo_coeff)
-                    k = numpy.einsum('ij,ji', self.mol.nuc[i].intor_symmetric('int1e_kin')/(1836.15267343 * self.mol.mass[self.mol.nuc[i].atom_index]), self.dm_nuc[i])
+                    k = numpy.einsum('ij,ji', self.mol.nuc[i].intor_symmetric('int1e_kin')/(self.mol.mass[self.mol.nuc[i].atom_index]*nist.ATOMIC_MASS/nist.E_MASS), self.dm_nuc[i])
                     kinetic_energy += k
                     x = numpy.einsum('xij,ji->x', self.mol.nuc[i].intor_symmetric('int1e_r', comp=3), self.dm_nuc[i])
                     logger.debug(self, 'Expectational position %s' %(x))

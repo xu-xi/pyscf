@@ -7,6 +7,8 @@ Coupled perturbed Hartree-Fock for constrained nuclear-electronic orbital method
 import numpy
 from pyscf import lib, gto, scf
 from pyscf.hessian.rks import Hessian
+from pyscf.data import nist
+from pyscf.lib import logger
 from functools import reduce
 
 class CPHF(lib.StreamObject):
@@ -19,6 +21,7 @@ class CPHF(lib.StreamObject):
         occidx_e = self.base.mf_elec.mo_occ > 0
         viridx_e = self.base.mf_elec.mo_occ == 0
         #nset = 3*len(self.atmlst)
+        self.verbose = 4
 
     def ao2mo(self, mf, mat):
         return numpy.asarray([reduce(numpy.dot, (mf.mo_coeff.T, x, mf.mo_coeff[:,mf.mo_occ>0])) for x in mat])
@@ -133,7 +136,6 @@ class CPHF(lib.StreamObject):
         R_mo = numpy.einsum('xmn, mi, na->xia', R_ao, mo_coeff_n, mo_coeff_n[:, mo_occ_n>0])
         C -= numpy.einsum('xia, cx->cia', R_mo, f1[i])
 
-        #print('get_A_n', C.shape)
         return C
 
     def get_R(self, i, mo1_n_i, f1_i):
@@ -250,7 +252,7 @@ class CPHF(lib.StreamObject):
             v1ao -= v1_en*self.mol.atom_charge(ia)*2 # *2 for c.c.
 
             if ia == a:
-                mass = 1836.15267343 * self.mol.mass[ia]
+                mass = self.mol.mass[ia] * nist.ATOMIC_MASS / nist.E_MASS
                 h1n = -self.mol.nuc[i].intor('int1e_ipkin', comp=3)/mass
                 h1n += self.mol.nuc[i].intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(ia)
                 h1n += h1n.transpose(0, 2, 1)
@@ -327,16 +329,17 @@ class CPHF(lib.StreamObject):
                     mo1base = numpy.concatenate((mo1base, r.ravel()))
                 else:
                     mo1base = numpy.concatenate((mo1base, numpy.zeros(9)))
-        print('The size of CPHF equations', len(mo1base))
+        logger.info(self, 'The size of CPHF equations: %s', len(mo1base))
+
 
         mo1 = lib.krylov(self.full_response, mo1base, tol=tol, max_cycle=max_cycle, hermi=hermi)
         mo1_e, mo1_n, f1 = self.mo12ne(mo1)
-        #print('f1', f1)
+        logger.debug(self, 'f1:\n%s', f1)
 
         v1mo_e = self.get_A_e(mo1_e, mo1_n)
         B_e, s1 = self.get_Bmat_elec(self.base.mf_elec)
         e1_e = B_e[:,occidx_e] + mo1_e[:,occidx_e] * lib.direct_sum('i-j->ij', e_i, e_i) - v1mo_e[:,occidx_e]
-        #print('e1e', e1_e)
+        logger.debug(self, 'e1e:\n%s', e1_e)
 
         e1_n = []
         for i in range(len(self.mol.nuc)):
@@ -351,7 +354,7 @@ class CPHF(lib.StreamObject):
             v1mo_n = self.get_A_n(i, mo1_e, mo1_n, f1)
             B_n, s1 = self.get_Bmat_nuc(i)
             e1 = B_n[:,occidx] + mo1_n[i][:,occidx] * lib.direct_sum('i-j->ij', e_i, e_i) - v1mo_n[:,occidx]
-            #print('e1n', e1)
+            logger.debug(self, 'e1n:\n%s', e1)
             e1_n.append(e1)
         
         return mo1_e, e1_e, mo1_n, e1_n, f1 
