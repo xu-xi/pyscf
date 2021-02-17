@@ -34,10 +34,7 @@ from pyscf.lo import iao
 from pyscf.lo import orth, pipek
 from pyscf import __config__
 
-MINAO = getattr(__config__, 'lo_iao_minao', 'minao')
-
-def ibo(mol, orbocc, locmethod='IBO', iaos=None, s=None,
-        exponent=4, grad_tol=1e-8, max_iter=200, minao=MINAO, verbose=logger.NOTE):
+def ibo(mol, orbocc, locmethod='IBO', iaos=None, s=None, exponent=4, grad_tol=1e-8, max_iter=200, verbose=logger.NOTE):
     '''Intrinsic Bonding Orbitals
 
     This function serves as a wrapper to the underlying localization functions
@@ -77,16 +74,14 @@ def ibo(mol, orbocc, locmethod='IBO', iaos=None, s=None,
     locmethod = locmethod.strip().upper()
     if locmethod == 'PM':
         EXPONENT = getattr(__config__, 'lo_ibo_PipekMezey_exponent', exponent)
-        ibos = PipekMezey(mol, orbocc, iaos, s, exponent=EXPONENT, minao=minao)
+        ibos = PipekMezey(mol, orbocc, iaos, s, exponent=EXPONENT)
         del(EXPONENT)
     else:
-        ibos = ibo_loc(mol, orbocc, iaos, s, exponent=exponent, \
-                       grad_tol=grad_tol, max_iter=max_iter, \
-                       minao=minao, verbose=verbose)
+        ibos = ibo_loc(mol, orbocc, iaos, s, exponent=exponent, grad_tol=grad_tol, max_iter=max_iter, verbose=verbose)
     return ibos
 
 def ibo_loc(mol, orbocc, iaos, s, exponent, grad_tol, max_iter,
-            minao=MINAO, verbose=logger.NOTE):
+            verbose=logger.NOTE):
     '''Intrinsic Bonding Orbitals. [Ref. JCTC, 9, 4834]
 
     This implementation follows Knizia's implementation execept that the
@@ -131,9 +126,7 @@ def ibo_loc(mol, orbocc, iaos, s, exponent, grad_tol, max_iter,
     #dynamic variables
     Converged = False
 
-    # render Atoms list without ghost atoms
-    iao_mol = iao.reference_mol(mol, minao=minao)
-    Atoms = [iao_mol.atom_pure_symbol(i) for i in range(iao_mol.natm)]
+    Atoms  = [mol.atom_symbol(i) for i in range(mol.natm)]
 
     #generates the parameters we need about the atomic structure
     nAtoms = len(Atoms)
@@ -215,7 +208,7 @@ def ibo_loc(mol, orbocc, iaos, s, exponent, grad_tol, max_iter,
     return numpy.dot(iaos, (orth.vec_lowdin(CIb)))
 
 
-def PipekMezey(mol, orbocc, iaos, s, exponent, minao=MINAO):
+def PipekMezey(mol, orbocc, iaos, s, exponent):
     '''
     Note this localization is slightly different to Knizia's implementation.
     The localization here reserves orthogonormality during optimization.
@@ -238,10 +231,11 @@ def PipekMezey(mol, orbocc, iaos, s, exponent, minao=MINAO):
     # Note: PM with Lowdin-orth IAOs is implemented in pipek.PM class
     # TODO: Merge the implemenation here to pipek.PM
 
+    MINAO = getattr(__config__, 'lo_iao_minao', 'minao')
     cs = numpy.dot(iaos.T.conj(), s)
     s_iao = numpy.dot(cs, iaos)
     iao_inv = numpy.linalg.solve(s_iao, cs)
-    iao_mol = iao.reference_mol(mol, minao=minao)
+    iao_mol = iao.reference_mol(mol, minao=MINAO)
 
     # Define the mulliken population of each atom based on IAO basis.
     # proj[i].trace is the mulliken population of atom i.
@@ -406,4 +400,3 @@ def MakeAtomIbOffsets(Atoms):
         iBfAt.append(iBfAt[-1] + nAoX[Atom])
     return iBfAt, nCoreX, nAoX, AoLabels
 
-del(MINAO)
