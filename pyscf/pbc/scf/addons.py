@@ -142,7 +142,7 @@ def smearing_(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
 
         sigma = mf.sigma
         if fix_spin:
-            fermi = [mo_energy[0][nocc[0]-1], mo_energy[1][nocc[1]-1]] 
+            fermi = [mo_energy[0][nocc[0]-1], mo_energy[1][nocc[1]-1]]
         else:
             fermi = mo_energy[nocc-1]
         if mu0 is None:
@@ -188,7 +188,7 @@ def smearing_(mf, sigma=None, method=SMEARING_METHOD, mu0=None, fix_spin=False):
                 mf.entropy = (numpy.exp(-((mo_es[0]-mu[0])/mf.sigma)**2).sum()
                               / (2*numpy.sqrt(numpy.pi)) / nkpts)
                 mf.entropy += (numpy.exp(-((mo_es[1]-mu[1])/mf.sigma)**2).sum()
-                              / (2*numpy.sqrt(numpy.pi)) / nkpts)
+                               / (2*numpy.sqrt(numpy.pi)) / nkpts)
             else:
                 mf.entropy = (numpy.exp(-((mo_es-mu)/mf.sigma)**2).sum()
                               / (2*numpy.sqrt(numpy.pi)) / nkpts)

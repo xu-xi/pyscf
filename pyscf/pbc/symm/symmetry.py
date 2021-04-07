@@ -35,7 +35,7 @@ def _is_right_handed(c):
     x = c[0]
     y = c[1]
     z = c[2]
-    val = np.dot(np.cross(x,y), z)   
+    val = np.dot(np.cross(x,y), z)
     return val > 0
 
 def get_Dmat(op, l):
@@ -60,7 +60,7 @@ def get_Dmat(op, l):
                 D[:, m+l] *= -1.0
     return D.round(15)
 
-def get_Dmat_cart(op,l_max): 
+def get_Dmat_cart(op,l_max):
     pp = get_Dmat(op, 1)
     Ds = [np.ones((1,1))]
     for l in range(1, l_max+1):

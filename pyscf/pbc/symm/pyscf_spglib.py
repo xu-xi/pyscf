@@ -50,7 +50,7 @@ def cell_to_spgcell(cell):
         symb = cell.atom_symbol(iatm)
         idx = ''.join([i for i in symb if unicode(i).isnumeric()])
         idx = unicode(idx)
-        if idx.isnumeric(): 
+        if idx.isnumeric():
             atm_num[iatm] += int(idx) * 1000
     spg_cell = (a, atm_pos, atm_num, cell.magmom)
     return spg_cell

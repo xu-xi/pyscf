@@ -835,7 +835,7 @@ def ewald(cell, ew_eta=None, ew_cut=None):
 energy_nuc = ewald
 
 def make_kpts(cell, nks, wrap_around=WRAP_AROUND, with_gamma_point=WITH_GAMMA,
-              scaled_center=None, 
+              scaled_center=None,
               space_group_symmetry=False, time_reversal_symmetry=False,
               symmorphic=True):
     '''Given number of kpoints along x,y,z , generate kpoints
@@ -1579,7 +1579,7 @@ class Cell(mole.Mole):
             abs_kpts : (nkpts, 3) ndarray of floats or :class:`KPoints` object
             kpts_in_ibz : bool
                 If True, return k-points in IBZ; otherwise, return k-points in BZ.
-                Default value is True. This has effects only if abs_kpts is a 
+                Default value is True. This has effects only if abs_kpts is a
                 :class:`KPoints` object
 
         Returns:

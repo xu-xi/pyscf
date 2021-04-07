@@ -33,7 +33,7 @@ def pyscf_to_ase_atoms(cell):
     from ase import Atoms
     from pyscf.lib import param
     from pyscf.pbc import gto
-    
+
     symbols = cell.elements
     positions = cell.atom_coords() * param.BOHR
     if isinstance(cell, gto.Cell):

@@ -78,7 +78,7 @@ def make_kpts_ibz(kpts):
         ibz_idx = kpts.bz2ibz[k]
         ibz_k_scaled = kpts.kpts_scaled_ibz[ibz_idx]
         for io, op in enumerate(op_rot):
-            if -1 in bz2bz_ks[:,io]: 
+            if -1 in bz2bz_ks[:,io]:
                 #This rotation is not in the subgroup
                 #that the k-mesh belongs to; only happens
                 #when k-mesh has lower symmetry than lattice.
@@ -194,13 +194,13 @@ def make_k4_ibz(kpts, sym='s1'):
     if sym == "s1":
         return np.asarray(k4), np.asarray(weight), np.asarray(bz2ibz)
     elif sym == "s2" or sym == "s4":
-        ibz2ibz_s2 = np.arange(len(k4)) 
+        ibz2ibz_s2 = np.arange(len(k4))
         k4_s2 = []
         weight_s2 = []
         for i, k in enumerate(k4):
             ki,kj,ka,kb = k
             k_sym = [kj,ki,kb,ka] #interchange dummy indices
-            if not k in k4_s2 and not k_sym in k4_s2:
+            if k not in k4_s2 and k_sym not in k4_s2:
                 k4_s2.append(k)
                 ibz2ibz_s2[i] = len(k4_s2) - 1
                 w = weight[i]
@@ -261,7 +261,7 @@ def make_k4_ibz(kpts, sym='s1'):
             for i, k in enumerate(k4_s2):
                 ki,kj,ka,kb = k
                 k_sym = [ka,kb,ki,kj] #complex conjugate
-                if not k in k4_s4 and not k_sym in k4_s4:
+                if k not in k4_s4 and k_sym not in k4_s4:
                     k4_s4.append(k)
                     w = weight_s2[i]
                     if k != k_sym and k_sym in k4_s2:
@@ -442,7 +442,7 @@ def symmetrize_density(kpts, rhoR_k, ibz_k_idx, mesh):
                 symmetrize_ft(c_rhoR, c_rhoR_k, c_op_rot, c_trans, c_mesh)
     return rhoR
 
-def symmetrize_wavefunction(kpts, psiR_k, mesh): 
+def symmetrize_wavefunction(kpts, psiR_k, mesh):
     #XXX need verification
     '''
     transform real-space wavefunctions from IBZ to full BZ
@@ -468,7 +468,7 @@ def symmetrize_wavefunction(kpts, psiR_k, mesh):
                 c_psiR = psiR[bz_k_idx].ctypes.data_as(ctypes.c_void_p)
                 c_psiR_k = psiR_k[ibz_k_idx].ctypes.data_as(ctypes.c_void_p)
                 c_op = op.ctypes.data_as(ctypes.c_void_p)
-                if is_complex: 
+                if is_complex:
                     libpbc.symmetrize_complex(c_psiR, c_psiR_k, c_op, c_mesh)
                 else:
                     libpbc.symmetrize(c_psiR, c_psiR_k, c_op, c_mesh)
@@ -647,7 +647,7 @@ def transform_mo_energy(kpts, mo_energy_ibz):
         if is_uhf:
             mo_energy_bz[0].append(mo_energy_ibz[0][ibz_k_idx])
             mo_energy_bz[1].append(mo_energy_ibz[1][ibz_k_idx])
-        else: 
+        else:
             mo_energy_bz.append(mo_energy_ibz[ibz_k_idx])
     return mo_energy_bz
 
@@ -745,7 +745,7 @@ def check_mo_occ_symmetry(kpts, mo_occ, tol=1e-5):
         mo_occ_ibz.append(mo_occ[kpts.ibz2bz[k]])
     return mo_occ_ibz
 
-def make_kpts(cell, kpts=np.zeros((1,3)), 
+def make_kpts(cell, kpts=np.zeros((1,3)),
               space_group_symmetry=False, time_reversal_symmetry=False,
               symmorphic=True):
     """
@@ -841,7 +841,7 @@ class KPoints(symm.Symmetry, lib.StreamObject):
         time_reversal_symm_bz : (nkpts,) ndarray of int
             Whether k-points in BZ and IBZ are related in addition by time-reversal symmetry.
     """
-    def __init__(self, cell=None, kpts=np.zeros((1,3))): 
+    def __init__(self, cell=None, kpts=np.zeros((1,3))):
         symm.Symmetry.__init__(self, cell)
         self.verbose = logger.NOTE
         if getattr(self.cell, 'verbose', None):
@@ -887,14 +887,14 @@ class KPoints(symm.Symmetry, lib.StreamObject):
         s += '\nk-points (scaled) in BZ                        weights\n'
         bzk = self.kpts_scaled
         for k in range(self.nkpts):
-            s += '%d:  %11.8f, %11.8f, %11.8f    %9.6f\n' % (k,
-                  bzk[k][0], bzk[k][1], bzk[k][2], self.weights[k])
+            s += '%d:  %11.8f, %11.8f, %11.8f    %9.6f\n' % \
+                (k, bzk[k][0], bzk[k][1], bzk[k][2], self.weights[k])
 
         s += 'k-points (scaled) in IBZ                       weights\n'
         ibzk = self.kpts_scaled_ibz
         for k in range(self.nkpts_ibz):
-            s += '%d:  %11.8f, %11.8f, %11.8f    %9.6f\n' % (k,
-                  ibzk[k][0], ibzk[k][1], ibzk[k][2], self.weights_ibz[k])
+            s += '%d:  %11.8f, %11.8f, %11.8f    %9.6f\n' % \
+                (k, ibzk[k][0], ibzk[k][1], ibzk[k][2], self.weights_ibz[k])
 
         s += 'mapping from BZ to IBZ\n'
         s += "%s" % self.bz2ibz
@@ -919,7 +919,7 @@ class KPoints(symm.Symmetry, lib.StreamObject):
             logger.info(self, 'k-points in IBZ                           weights')
             ibzk = self.kpts_scaled_ibz
             for k in range(self.nkpts_ibz):
-                logger.info(self, '%d:  %11.8f, %11.8f, %11.8f    %d/%d', 
+                logger.info(self, '%d:  %11.8f, %11.8f, %11.8f    %d/%d',
                             k, ibzk[k][0], ibzk[k][1], ibzk[k][2],
                             np.floor(self.weights_ibz[k]*self.nkpts), self.nkpts)
 
@@ -934,9 +934,9 @@ class KPoints(symm.Symmetry, lib.StreamObject):
         for i in range(self.nkpts_ibz):
             ki = self.kpts_ibz[i]
             where = member(ki, self.kpts)
-            for j in range(self.nkpts): 
+            for j in range(self.nkpts):
                 kj = self.kpts[j]
-                if not j in where:
+                if j not in where:
                     kptij_lst.extend([(ki,kj)])
         kptij_lst = np.asarray(kptij_lst)
         return kptij_lst
@@ -974,8 +974,8 @@ if __name__ == "__main__":
         Si  0.0 0.0 0.0
         Si  1.3467560987 1.3467560987 1.3467560987
     """
-    cell.a = [[0.0, 2.6935121974, 2.6935121974], 
-              [2.6935121974, 0.0, 2.6935121974], 
+    cell.a = [[0.0, 2.6935121974, 2.6935121974],
+              [2.6935121974, 0.0, 2.6935121974],
               [2.6935121974, 2.6935121974, 0.0]]
     cell.verbose = 4
     cell.build()

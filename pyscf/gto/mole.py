@@ -293,7 +293,7 @@ def atom_types(atoms, basis=None, magmom=None):
                     atmgroup_new[elem+'_'+suffix[mag]] = subgrp.tolist()
             else:
                 atmgroup_new[elem] = idx
-        atmgroup = atmgroup_new 
+        atmgroup = atmgroup_new
     return atmgroup
 
 
@@ -2592,8 +2592,8 @@ class Mole(lib.StreamObject):
             coorda = tuple([x * param.BOHR for x in atom[1]])
             coordb = tuple([x for x in atom[1]])
             magmom = self.magmom[ia]
-            self.stdout.write('[INPUT]%3d %-4s %16.12f %16.12f %16.12f AA  '\
-                              '%16.12f %16.12f %16.12f Bohr  %4.1f\n' \
+            self.stdout.write('[INPUT]%3d %-4s %16.12f %16.12f %16.12f AA  '
+                              '%16.12f %16.12f %16.12f Bohr  %4.1f\n'
                               % ((ia+1, _symbol(atom[0])) + coorda + coordb + (magmom,)))
         if self.nucmod:
             if isinstance(self.nucmod, (int, str, unicode,

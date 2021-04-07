@@ -48,7 +48,7 @@ def get_jk(mf, cell=None, dm_kpts=None, hermi=0, kpts=None, kpts_band=None,
 
     dmaa = np.empty([n_dm, nkpts, nao, nao], dtype=np.complex128)
     dmab = np.empty([n_dm, nkpts, nao, nao], dtype=np.complex128)
-    dmbb = np.empty([n_dm, nkpts, nao, nao], dtype=np.complex128) 
+    dmbb = np.empty([n_dm, nkpts, nao, nao], dtype=np.complex128)
     for i in range(n_dm):
         dmaa[i] = kpts.transform_dm(dms[i,:,:nao,:nao])
         dmab[i] = kpts.transform_dm(dms[i,:,nao:,:nao])

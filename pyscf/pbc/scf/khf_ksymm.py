@@ -58,7 +58,7 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
         ndm = len(dm)
     if ndm != kpts.nkpts_ibz:
         raise RuntimeError("Number of input density matrices does not \
-                           match the number of IBZ kpts: %d vs %d." \
+                           match the number of IBZ kpts: %d vs %d."
                            % (ndm, kpts.nkpts_ibz))
     dm = kpts.transform_dm(dm)
     return khf.get_rho(mf, dm, grids, kpts.kpts)
@@ -152,11 +152,11 @@ class KsymAdaptedKSCF(khf.KSCF):
         nelectron = float(self.cell.tot_electrons(nkpts))
         if abs(ne - nelectron) > 1e-7*nkpts:
             logger.debug(self, 'Big error detected in the electron number '
-                        'of initial guess density matrix (Ne/cell = %g)!\n'
-                        '  This can cause huge error in Fock matrix and '
-                        'lead to instability in SCF for low-dimensional '
-                        'systems.\n  DM is normalized wrt the number '
-                        'of electrons %s', ne/nkpts, nelectron/nkpts)
+                         'of initial guess density matrix (Ne/cell = %g)!\n'
+                         '  This can cause huge error in Fock matrix and '
+                         'lead to instability in SCF for low-dimensional '
+                         'systems.\n  DM is normalized wrt the number '
+                         'of electrons %s', ne/nkpts, nelectron/nkpts)
             dm_kpts *= (nelectron / ne).reshape(-1,1,1)
         return dm_kpts
 
@@ -178,8 +178,8 @@ class KsymAdaptedKSCF(khf.KSCF):
     def get_jk(self, cell=None, dm_kpts=None, hermi=1, kpts=None, kpts_band=None,
                with_j=True, with_k=True, omega=None, **kwargs):
         if isinstance(kpts, np.ndarray):
-            return super(KsymAdaptedKSCF, self).get_jk(cell, dm_kpts, hermi, kpts, kpts_band, 
-                                  with_j, with_k, omega, **kwargs)
+            return super(KsymAdaptedKSCF, self).get_jk(cell, dm_kpts, hermi, kpts, kpts_band,
+                                                       with_j, with_k, omega, **kwargs)
         if cell is None: cell = self.cell
         if kpts is None: kpts = self.kpts
         if dm_kpts is None: dm_kpts = self.make_rdm1()
@@ -190,7 +190,7 @@ class KsymAdaptedKSCF(khf.KSCF):
             ndm = len(dm_kpts)
         if ndm != kpts.nkpts_ibz:
             raise RuntimeError("Number of input density matrices does not \
-                               match the number of IBZ kpts: %d vs %d." \
+                               match the number of IBZ kpts: %d vs %d."
                                % (ndm, kpts.nkpts_ibz))
         dm_kpts = kpts.transform_dm(dm_kpts)
         if kpts_band is None: kpts_band = kpts.kpts_ibz

@@ -37,7 +37,7 @@ def search_point_group_ops(cell, tol=SYMPREC):
 
     rotations = []
     for op in lib.cartesian_prod([[1,0,-1],]*9):
-        W = np.asarray(op, dtype=np.int32).reshape(3,3) 
+        W = np.asarray(op, dtype=np.int32).reshape(3,3)
         G_tilde = reduce(np.dot, (W.T, G, W))
 
         #check change of metric
@@ -56,7 +56,7 @@ def search_point_group_ops(cell, tol=SYMPREC):
             continue
 
         #check if rotation swaps periodic and non-periodic axes
-        pbc_axis2 = np.logical_and.outer(pbc_axis, pbc_axis)       
+        pbc_axis2 = np.logical_and.outer(pbc_axis, pbc_axis)
         if W[~(pbc_axis2 | np.eye(3, dtype=bool))].any():
             continue
 

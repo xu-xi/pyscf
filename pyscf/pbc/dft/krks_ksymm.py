@@ -45,7 +45,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if ground_state:
         if len(dm) != kpts.nkpts_ibz:
             raise RuntimeError("Number of input density matrices does not \
-                               match the number of IBZ kpts: %d vs %d." \
+                               match the number of IBZ kpts: %d vs %d."
                                % (len(dm), kpts.nkpts_ibz))
         dm_bz = kpts.transform_dm(dm)
 
@@ -112,7 +112,7 @@ def get_rho(mf, dm=None, grids=None, kpts=None):
     ndm = len(dm)
     if ndm != kpts.nkpts_ibz:
         raise RuntimeError("Number of input density matrices does not \
-                           match the number of IBZ kpts: %d vs %d." \
+                           match the number of IBZ kpts: %d vs %d."
                            % (ndm, kpts.nkpts_ibz))
     dm = kpts.transform_dm(dm)
     if isinstance(mf.with_df, multigrid.MultiGridFFTDF):

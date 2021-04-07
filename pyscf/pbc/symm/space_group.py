@@ -30,7 +30,7 @@ def transform_rot(op, a, b):
     r'''
     Transform rotation operator from :math:`\mathbf{a}` basis system to :math:`\mathbf{b}` basis system.
 
-    Note: 
+    Note:
         This function raises error when the point-group symmetries of the two basis systems are different.
 
     Arguments:
@@ -62,7 +62,7 @@ def transform_trans(op, a, b):
             Basis vectors of :math:`\mathbf{a}` basis system (row-major).
         b : (3,3) array
             Basis vectors of :math:`\mathbf{b}` basis system (row-major).
- 
+
     Returns:
         A (3,) array
             Translation operator in :math:`\mathbf{b}` basis system.
@@ -74,7 +74,7 @@ def transform_trans(op, a, b):
 class SpaceGroup_element():
     '''
     Matrix representation of space group operations
-    
+
     Attributes:
         rot : (3,3) array
             Rotation operator.
@@ -241,12 +241,12 @@ class SpaceGroup(lib.StreamObject):
     Attributes:
         cell : :class:`Cell` object
         symprec : float
-            Numerical tolerance for determining the space group. 
+            Numerical tolerance for determining the space group.
             Default value is 1e-6 in the unit of length.
         verbose : int
             Print level. Default value equals to `cell.verbose`.
         backend: str
-            Choose which backend to use for symmetry detection. 
+            Choose which backend to use for symmetry detection.
             Default is `pyscf` and other choices are `spglib`.
         ops : list of :class:`SpaceGroup_element` objects
             Matrix representation of the space group operations (in direct lattice system).
@@ -306,7 +306,8 @@ class SpaceGroup(lib.StreamObject):
         if self.verbose >= logger.INFO:
             gn = self.groupname
             if gn['international_symbol'] is not None:
-                logger.info(self, '[Cell] International symbol:  %s (%d)', gn['international_symbol'], gn['international_number'])
+                logger.info(self, '[Cell] International symbol:  %s (%d)',
+                            gn['international_symbol'], gn['international_number'])
             logger.info(self, '[Cell] Point group symbol:  %s', gn['point_group_symbol'])
         if self.verbose >= logger.DEBUG:
             logger.debug(self, "Space group symmetry operations:")

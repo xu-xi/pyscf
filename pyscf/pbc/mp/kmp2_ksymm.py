@@ -44,7 +44,6 @@ def kernel(mp, mo_energy, mo_coeff, verbose=logger.NOTE, with_t2=WITH_T2):
     eijab = np.zeros((nocc,nocc,nvir,nvir))
 
     fao2mo = mp._scf.with_df.ao2mo
-    kconserv = mp.khelper.kconserv
     emp2 = 0.
     oovv_ij = np.zeros((nkpts,nocc,nocc,nvir,nvir), dtype=mo_coeff[0].dtype)
 
@@ -151,7 +150,6 @@ def make_t2_for_rdm1(mp):
     eia = np.zeros((nocc,nvir))
     eijab = np.zeros((nocc,nocc,nvir,nvir))
     fao2mo = mp._scf.with_df.ao2mo
-    kconserv = mp.khelper.kconserv
     mo_e_o = [mo_energy[k][:nocc] for k in range(nkpts)]
     mo_e_v = [mo_energy[k][nocc:] for k in range(nkpts)]
     nonzero_opadding, nonzero_vpadding = kmp2.padding_k_idx(mp, kind="split")
