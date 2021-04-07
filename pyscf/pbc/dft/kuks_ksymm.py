@@ -16,7 +16,6 @@
 # Author: Xing Zhang <zhangxing.nju@gmail.com>
 #
 
-import time
 import numpy as np
 from pyscf import __config__
 from pyscf import lib
@@ -34,7 +33,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if cell is None: cell = ks.cell
     if dm is None: dm = ks.make_rdm1()
     if kpts is None: kpts = ks.kpts
-    t0 = (time.clock(), time.time())
+    t0 = (logger.process_clock(), logger.perf_counter())
 
     # ndim = 4 : dm.shape = ([alpha,beta], nkpts, nao, nao)
     ground_state = (dm.ndim == 4 and dm.shape[0] == 2 and kpts_band is None)

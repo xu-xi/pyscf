@@ -16,7 +16,6 @@
 # Author: Xing Zhang <zhangxing.nju@gmail.com>
 #
 
-import time
 import numpy as np
 import h5py
 from pyscf import __config__
@@ -194,7 +193,7 @@ class KsymAdaptedKSCF(khf.KSCF):
                                % (ndm, kpts.nkpts_ibz))
         dm_kpts = kpts.transform_dm(dm_kpts)
         if kpts_band is None: kpts_band = kpts.kpts_ibz
-        cpu0 = (time.clock(), time.time())
+        cpu0 = (logger.process_clock(), logger.perf_counter())
         vj, vk = self.with_df.get_jk(dm_kpts, hermi, kpts.kpts, kpts_band,
                                      with_j, with_k, omega, exxdiv=self.exxdiv)
         logger.timer(self, 'vj and vk', *cpu0)
