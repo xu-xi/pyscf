@@ -33,7 +33,7 @@ def kernel(mp, mo_energy, mo_coeff, verbose=logger.NOTE, with_t2=WITH_T2):
     else:
         t2 = None
 
-    t0 = (time.clock(), time.time())
+    t0 = (logger.process_clock(), logger.perf_counter())
     nmo = mp.nmo
     nocc = mp.nocc
     nvir = nmo - nocc
