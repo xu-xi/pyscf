@@ -32,7 +32,7 @@ class Hessian(lib.StreamObject):
         self.atmlst = range(self.mol.natm)
         self.verbose = 4
         if self.base.epc is not None:
-            raise NotImplementedError('The gradient with epc is not implemented')
+            raise NotImplementedError('Hessian with epc is not implemented')
 
 
     def hess_elec(self, mo1_e, e1_e):

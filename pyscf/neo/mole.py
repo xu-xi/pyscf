@@ -61,7 +61,7 @@ class Mole(gto.mole.Mole):
         nuc.charge += quantum_nuclear_charge
         #nuc.charge = 2
         nuc.spin = 0 
-        #nuc.nelectron = 1
+        nuc.nelectron = 2 # avoid UHF
         #self.nuc.nelectron = self.nuc_num
         #self.nuc.spin = self.nuc_num
         return nuc

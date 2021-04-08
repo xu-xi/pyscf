@@ -20,8 +20,10 @@ class KS(HF):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol):
+    def __init__(self, mol, unrestricted=False):
         HF.__init__(self, mol)
+
+        self.unrestricted = unrestricted
 
         if self.unrestricted == True:
             self.mf_elec = dft.UKS(mol.elec)
@@ -67,7 +69,7 @@ class KS(HF):
 
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
             self.mf_nuc[i].get_hcore = self.get_hcore_nuc
-            self.mf_nuc[i].nuc_state = 0
+            self.mf_nuc[i].occ_state = 0
             self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
 
@@ -134,7 +136,10 @@ class KS(HF):
         for ao, mask, weight, coords in ni.block_loop(mol, grids, nao):
             aow = numpy.ndarray(ao.shape, order='F', buffer=aow)
             ao_elec = eval_ao(self.mol.elec, coords)
-            rho_elec = eval_rho(self.mol.elec, ao_elec, self.dm_elec)
+            if self.unrestricted == True:
+                rho_elec = eval_rho(self.mol.elec, ao_elec, self.dm_elec[0]+self.dm_elec[1])
+            else:
+                rho_elec = eval_rho(self.mol.elec, ao_elec, self.dm_elec)
             ao_nuc = eval_ao(mol, coords)
             rho_nuc = eval_rho(mol, ao_nuc, dm)
 
@@ -178,7 +183,11 @@ class KS(HF):
                 for ao, mask, weight, coords in ni.block_loop(mol, grids, nao):
                     aow = numpy.ndarray(ao.shape, order='F', buffer=aow)
                     ao_elec = eval_ao(mol, coords)
-                    rho_elec = eval_rho(mol, ao_elec, dm)
+                    if self.unrestricted == True:
+                        rho_elec = eval_rho(mol, ao_elec, dm[0]+dm[1])
+                    else:
+                        rho_elec = eval_rho(mol, ao_elec, dm)
+
                     ao_nuc = eval_ao(self.mol.nuc[i], coords)
                     rho_nuc = eval_rho(self.mol.nuc[i], ao_nuc, self.dm_nuc[i])
 
@@ -189,7 +198,10 @@ class KS(HF):
                     vmat += _dot_ao_ao(mol, ao_elec, aow, mask, shls_slice, ao_loc)
 
         vmat += vmat.conj().T
-        veff = dft.rks.get_veff(self.mf_elec, mol, dm, dm_last, vhf_last, hermi)
+        if self.unrestricted == True:
+            veff = dft.uks.get_veff(self.mf_elec, mol, dm, dm_last, vhf_last, hermi)
+        else:
+            veff = dft.rks.get_veff(self.mf_elec, mol, dm, dm_last, vhf_last, hermi)
         vxc = lib.tag_array(veff + vmat, ecoul = veff.ecoul, exc = veff.exc, vj = veff.vj, vk = veff.vk)
         return vxc
 

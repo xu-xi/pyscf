@@ -33,14 +33,14 @@ class Pyscf_NEO(Calculator):
             elif atoms[i] == 'D':
                 mol.atom.append(['H@2', tuple(positions[i])])
             else:
-                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
+                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])]) #TODO: why with %i ?
         mol.basis = self.parameters.basis
         mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge, spin = self.parameters.spin)
         if self.parameters.spin == 0:
             mf = neo.CDFT(mol)
         else:
-            mf = neo.CDFT(mol, restrict = False)
-        mf.xc = self.parameters.xc
+            mf = neo.CDFT(mol, unrestricted = True)
+        mf.mf_elec.xc = self.parameters.xc
         self.results['energy'] = mf.scf()*Hartree
         g = mf.Gradients()
         self.results['forces'] = -g.grad()*Hartree/Bohr

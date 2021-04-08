@@ -34,7 +34,7 @@ class Gradients(lib.StreamObject):
         self.verbose = 4
         self.grad = self.kernel
         if self.base.epc is not None:
-            raise NotImplementedError('The gradient with epc is not implemented')
+            raise NotImplementedError('Gradient with epc is not implemented')
 
     #as_scanner = grad.rhf.as_scanner
 

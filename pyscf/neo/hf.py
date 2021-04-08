@@ -86,15 +86,9 @@ class HF(SCF):
     def __init__(self, mol, unrestricted = False):
         SCF.__init__(self, mol)
 
-        self.mol = mol
-        self.dm_elec = None
-        self.dm_nuc = [None]*self.mol.nuc_num
-        self.mf_nuc = [None]*self.mol.nuc_num
         self.verbose = 4
+        self.mol = mol
         self.unrestricted = unrestricted
-
-    def build(self):
-        'build the Hamiltonian for NEO-HF'
         # set up the Hamiltonian for electrons
         if self.unrestricted == True:
             self.mf_elec = scf.UHF(self.mol.elec)
@@ -103,16 +97,24 @@ class HF(SCF):
             self.mf_elec = scf.RHF(self.mol.elec)
             self.dm_elec = self.mf_elec.get_init_guess(key='1e')
 
+        self.mf_nuc = [None] * self.mol.nuc_num
+        self.dm_nuc = [None] * self.mol.nuc_num
+        for i in range(len(self.mol.nuc)):
+            self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
+            self.mf_nuc[i].occ_state = 0 # for delta-SCF
+            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
+
+
+    def build(self):
+        'build the Hamiltonian for NEO-HF'
+        
         self.mf_elec.get_hcore = self.get_hcore_elec
 
         # set up the Hamiltonian for each quantum nucleus
         for i in range(len(self.mol.nuc)):
-            self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
             self.mf_nuc[i].get_hcore = self.get_hcore_nuc
             self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
-            self.mf_nuc[i].nuc_state = 0
-            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
 
     def get_hcore_nuc(self, mole):
@@ -141,12 +143,12 @@ class HF(SCF):
         return h
 
     def get_occ_nuc(self, mf_nuc):
-        def get_occ(nuc_energy=None, nuc_coeff=None):
+        def get_occ(nuc_energy, nuc_coeff):
             'label the occupation for quantum nucleus'
 
             e_idx = numpy.argsort(nuc_energy)
             nuc_occ = numpy.zeros(nuc_energy.size)
-            nuc_occ[e_idx[mf_nuc.nuc_state]] = 1
+            nuc_occ[e_idx[mf_nuc.occ_state]] = 1
 
             return nuc_occ
         return get_occ
@@ -275,7 +277,7 @@ class HF(SCF):
         self.dm_elec = self.mf_elec.make_rdm1()
 
         for i in range(len(self.mf_nuc)):
-            self.mf_nuc[i].scf(dm0=self.dm_nuc[i], dump_chk=False)
+            self.mf_nuc[i].scf(self.dm_nuc[i], dump_chk=False) #TODO remove dump_chk
             self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
         E_tot = self.energy_tot()
@@ -289,10 +291,10 @@ class HF(SCF):
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
 
             E_last = E_tot
-            self.mf_elec.scf(dm0=self.dm_elec)
+            self.mf_elec.scf(self.dm_elec)
             self.dm_elec = self.mf_elec.make_rdm1()
             for i in range(len(self.mf_nuc)):
-                self.mf_nuc[i].scf(dm0=self.dm_nuc[i], dump_chk=False)
+                self.mf_nuc[i].scf(self.dm_nuc[i], dump_chk=False)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
 
             E_tot = self.energy_tot()
