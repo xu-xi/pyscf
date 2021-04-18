@@ -632,6 +632,28 @@ def transform_dm(kpts, dm_ibz):
         dms = lib.asarray(dms)
     return lib.tag_array(dms, mo_coeff=mo_coeff, mo_occ=mo_occ)
 
+def dm_at_ref_cell(kpts, dm_ibz):
+    """
+    Given the density matrices in IBZ, compute the reference cell density matrix.
+
+    Parameters
+    ----------
+        kpts : :class:`KPoints` object
+        dm_ibz : ([2,] nkpts_ibz, nao, nao) ndarray
+            Density matrices for k-points in IBZ.
+
+    Returns
+    -------
+        dm0 : ([2,] nao, nao) ndarray
+            Density matrix at reference cell.
+    """
+    dm_bz = transform_dm(kpts, dm_ibz)
+    dm0 = np.sum(dm_bz, axis=-3) / kpts.nkpts
+    if abs(dm0.imag).max() > 1e-10:
+        logger.warn(kpts, 'Imaginary density matrix found at reference cell: \
+                    abs(dm0.imag).max() = %g', abs(dm0.imag).max())
+    return dm0
+
 def transform_mo_energy(kpts, mo_energy_ibz):
     '''
     Transform MO energies from IBZ to full BZ
@@ -902,6 +924,9 @@ class KPoints(symm.Symmetry, lib.StreamObject):
         s += "%s" % self.ibz2bz
         return s
 
+    def __len__(self):
+        return self.nkpts_ibz
+
     def build(self, space_group_symmetry=True, time_reversal_symmetry=True,
               symmorphic=True, *args, **kwargs):
         symm.Symmetry.build(self, space_group_symmetry, symmorphic, *args, **kwargs)
@@ -965,6 +990,7 @@ class KPoints(symm.Symmetry, lib.StreamObject):
     check_mo_occ_symmetry = check_mo_occ_symmetry
     transform_fock = transform_fock
     transform_1e_operator = transform_1e_operator
+    dm_at_ref_cell = dm_at_ref_cell
 
 if __name__ == "__main__":
     import numpy
