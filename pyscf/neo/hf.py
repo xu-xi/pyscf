@@ -8,6 +8,7 @@ import numpy
 from pyscf import gto
 from pyscf import scf
 from pyscf import lib
+from pyscf import neo
 from pyscf.lib import logger
 from pyscf.scf import rhf
 from pyscf.scf.hf import SCF
@@ -153,14 +154,23 @@ class HF(SCF):
             return nuc_occ
         return get_occ
 
-    def get_init_guess_nuc(self, mf_nuc, key=None):
-        '''Generate initial guess density matrix for quantum nuclei from core hamiltonian
+    def get_init_guess_nuc(self, mf_nuc, key='1e'):
+        '''Generate initial guess density matrix for quantum nuclei 
 
            Returns:
             Density matrix, 2D ndarray
         '''
-        mol = mf_nuc.mol
-        h1n = self.get_hcore(mol)
+        if key == 'atom':
+            ia = mf_nuc.mol.atom_index
+            mol_temp = neo.Mole()
+            mol_temp.build(atom = self.mol.atom, charge = self.mol.charge, spin = self.mol.spin, quantum_nuc = [ia])
+            mol = mol_temp.nuc[0]
+        elif key == '1e':
+            mol = mf_nuc.mol
+        else:
+            raise ValueError('Unsupported method for initial guess of quantum nuclei: %s' %(key))
+
+        h1n = self.get_hcore_nuc(mol)
         s1n = mol.intor_symmetric('int1e_ovlp')
         nuc_energy, nuc_coeff = scf.hf.eig(h1n, s1n)
         nuc_occ = mf_nuc.get_occ(nuc_energy, nuc_coeff)

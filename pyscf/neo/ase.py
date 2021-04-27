@@ -33,7 +33,7 @@ class Pyscf_NEO(Calculator):
             elif atoms[i] == 'D':
                 mol.atom.append(['H@2', tuple(positions[i])])
             else:
-                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])]) #TODO: why with %i ?
+                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])]) 
         mol.basis = self.parameters.basis
         mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge, spin = self.parameters.spin)
         if self.parameters.spin == 0:

@@ -21,8 +21,8 @@ class CDFT(KS):
     >>> mf.scf()
     '''
 
-    def __init__(self, mol):
-        KS.__init__(self, mol)
+    def __init__(self, mol, **kwargs):
+        KS.__init__(self, mol, **kwargs)
         self.scf = self.inner_scf
         self.f = [numpy.zeros(3)] * self.mol.natm
 
