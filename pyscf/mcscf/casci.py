@@ -17,7 +17,7 @@
 #
 
 import sys
-import time
+
 from functools import reduce
 import numpy
 from pyscf import lib
@@ -295,6 +295,8 @@ def cas_natorb(mc, mo_coeff=None, ci=None, eris=None, sort=False,
     elif getattr(mc.fcisolver, 'states_transform_ci_for_orbital_rotation', None):
         fcivec = mc.fcisolver.states_transform_ci_for_orbital_rotation(ci, ncas, nelecas, ucas)
 
+    # Rerun fcisolver to get wavefunction if it cannot be transformed from
+    # existed one.
     if fcivec is None:
         log.info('FCI vector not available, call CASCI to update wavefunction')
         mocas = mo_coeff1[:,ncore:nocc]
@@ -423,7 +425,7 @@ def canonicalize(mc, mo_coeff=None, ci=None, eris=None, sort=False,
     fock_ao = mc.get_fock(mo_coeff, ci, eris, casdm1, verbose)
     if cas_natorb:
         mo_coeff1, ci, mc.mo_occ = mc.cas_natorb(mo_coeff, ci, eris, sort, casdm1,
-                                           verbose, with_meta_lowdin)
+                                                 verbose, with_meta_lowdin)
     else:
         # Keep the active space unchanged by default.  The rotation in active space
         # may cause problem for external CI solver eg DMRG.
@@ -488,7 +490,7 @@ def kernel(casci, mo_coeff=None, ci0=None, verbose=logger.NOTE):
     '''
     if mo_coeff is None: mo_coeff = casci.mo_coeff
     log = logger.new_logger(casci, verbose)
-    t0 = (time.clock(), time.time())
+    t0 = (logger.process_clock(), logger.perf_counter())
     log.debug('Start CASCI')
 
     ncas = casci.ncas
@@ -606,17 +608,16 @@ class CASCI(lib.StreamObject):
         ncore : int or tuple of int
             Core electron number.  In UHF-CASSCF, it's a tuple to indicate the different core eletron numbers.
         natorb : bool
-            Whether to transform natural orbital in active space.  Be cautious
-            of this parameter when CASCI/CASSCF are combined with DMRG solver
-            or selected CI solver because DMRG and selected CI are not invariant
-            to the rotation in active space.
+            Whether to transform natural orbitals in active space.
+            Note: when CASCI/CASSCF are combined with DMRG solver or selected
+            CI solver, enabling this parameter may slightly change the total energy.
             False by default.
         canonicalization : bool
-            Whether to canonicalize orbitals. Note that canonicalization does
-            not change the orbitals in active space by default. It only
-            diagonalizes core and external space of the general Fock matirx.
-            To get the natural orbitals in active space, attribute natorb
-            need to be enabled.
+            Whether to canonicalize orbitals in core and external space
+            against the general Fock matrix.
+            The orbitals in active space are NOT transformed by default. To
+            get the natural orbitals in active space, the attribute .natorb
+            needs to be enabled.
             True by default.
         sorting_mo_energy : bool
             Whether to sort the orbitals based on the diagonal elements of the
@@ -926,7 +927,7 @@ To enable the solvent model for CASCI, the following code needs to be called
     def cas_natorb_(self, mo_coeff=None, ci=None, eris=None, sort=False,
                     casdm1=None, verbose=None, with_meta_lowdin=WITH_META_LOWDIN):
         self.mo_coeff, self.ci, self.mo_occ = cas_natorb(self, mo_coeff, ci, eris,
-                                                 sort, casdm1, verbose)
+                                                         sort, casdm1, verbose)
         return self.mo_coeff, self.ci, self.mo_occ
 
     def get_fock(self, mo_coeff=None, ci=None, eris=None, casdm1=None,
@@ -934,6 +935,7 @@ To enable the solvent model for CASCI, the following code needs to be called
         return get_fock(self, mo_coeff, ci, eris, casdm1, verbose)
 
     canonicalize = canonicalize
+
     @lib.with_doc(canonicalize.__doc__)
     def canonicalize_(self, mo_coeff=None, ci=None, eris=None, sort=False,
                       cas_natorb=False, casdm1=None, verbose=None,

@@ -21,7 +21,7 @@
 # Recent Advances in Density Functional Methods, Chapter 5, M. E. Casida
 #
 
-import time
+
 from functools import reduce
 import numpy
 from pyscf import lib
@@ -44,7 +44,7 @@ POSTIVE_EIG_THRESHOLD = getattr(__config__, 'tdscf_rhf_TDDFT_positive_eig_thresh
 
 def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     '''Generate function to compute (A+B)x
-    
+
     Kwargs:
         wfnsym : int or str
             Point group symmetry irrep symbol or ID for excited CIS wavefunction.
@@ -363,8 +363,7 @@ def analyze(tdobj, verbose=None):
 
     if mol.symmetry:
         orbsym = hf_symm.get_orbsym(mol, mo_coeff)
-        orbsym_in_d2h = numpy.asarray(orbsym) % 10  # convert to D2h irreps
-        x_sym = (orbsym_in_d2h[mo_occ==2,None] ^ orbsym_in_d2h[mo_occ==0]).ravel()
+        x_sym = symm.direct_prod(orbsym[mo_occ==2], orbsym[mo_occ==0], mol.groupname)
     else:
         x_sym = None
 
@@ -375,8 +374,7 @@ def analyze(tdobj, verbose=None):
             log.note('Excited State %3d: %12.5f eV %9.2f nm  f=%.4f',
                      i+1, e_ev[i], wave_length[i], f_oscillator[i])
         else:
-            wfnsym_id = x_sym[abs(x).argmax()]
-            wfnsym = symm.irrep_id2name(mol.groupname, wfnsym_id)
+            wfnsym = analyze_wfnsym(tdobj, x_sym, x)
             log.note('Excited State %3d: %4s %12.5f eV %9.2f nm  f=%.4f',
                      i+1, wfnsym, e_ev[i], wave_length[i], f_oscillator[i])
 
@@ -413,6 +411,23 @@ def analyze(tdobj, verbose=None):
             log.info('%3d    %11.4f %11.4f %11.4f',
                      i+1, m[0], m[1], m[2])
     return tdobj
+
+def analyze_wfnsym(tdobj, x_sym, x):
+    '''Guess the wfn symmetry of TDDFT X amplitude'''
+    possible_sym = x_sym[(x > 1e-7) | (x < -1e-7)]
+    if numpy.all(possible_sym == symm.MULTI_IRREPS):
+        if tdobj.wfnsym is None:
+            wfnsym = '???'
+        else:
+            wfnsym = tdobj.wfnsym
+    else:
+        ids = possible_sym[possible_sym != symm.MULTI_IRREPS]
+        ids = numpy.unique(ids)
+        if ids.size == 1:
+            wfnsym = symm.irrep_id2name(tdobj.mol.groupname, ids[0])
+        else:
+            wfnsym = '???'
+    return wfnsym
 
 
 def transition_dipole(tdobj, xy=None):
@@ -591,7 +606,6 @@ def as_scanner(td):
     >>> de = td_scanner(gto.M(atom='H 0 0 0; F 0 0 1.5'))
     [ 0.14844013  0.14844013  0.47641829]
     '''
-    from pyscf import gto
     if isinstance(td, lib.SinglePointScanner):
         return td
 
@@ -616,27 +630,7 @@ def as_scanner(td):
     return TD_Scanner(td)
 
 
-class TDA(lib.StreamObject):
-    '''Tamm-Dancoff approximation
-
-    Attributes:
-        conv_tol : float
-            Diagonalization convergence tolerance.  Default is 1e-9.
-        nstates : int
-            Number of TD states to be computed. Default is 3.
-
-    Saved results:
-
-        converged : bool
-            Diagonalization converged or not
-        e : 1D array
-            excitation energy for each excited state.
-        xy : A list of two 2D arrays
-            The two 2D arrays are Excitation coefficients X (shape [nocc,nvir])
-            and de-excitation coefficients Y (shape [nocc,nvir]) for each
-            excited state.  (X,Y) are normalized to 1/2 in RHF/RKS methods and
-            normalized to 1 for UHF/UKS methods. In the TDA calculation, Y = 0.
-    '''
+class TDMixin(lib.StreamObject):
     conv_tol = getattr(__config__, 'tdscf_rhf_TDA_conv_tol', 1e-9)
     nstates = getattr(__config__, 'tdscf_rhf_TDA_nstates', 3)
     singlet = getattr(__config__, 'tdscf_rhf_TDA_singlet', True)
@@ -711,8 +705,7 @@ class TDA(lib.StreamObject):
         return self
 
     def gen_vind(self, mf):
-        '''Compute Ax'''
-        return gen_tda_hop(mf, singlet=self.singlet, wfnsym=self.wfnsym)
+        raise NotImplementedError
 
     @lib.with_doc(get_ab.__doc__)
     def get_ab(self, mf=None):
@@ -726,6 +719,59 @@ class TDA(lib.StreamObject):
             return x/diagd
         return precond
 
+    analyze = analyze
+    get_nto = get_nto
+    oscillator_strength = oscillator_strength
+
+    _contract_multipole = _contract_multipole  # needed by following methods
+    transition_dipole              = transition_dipole
+    transition_quadrupole          = transition_quadrupole
+    transition_octupole            = transition_octupole
+    transition_velocity_dipole     = transition_velocity_dipole
+    transition_velocity_quadrupole = transition_velocity_quadrupole
+    transition_velocity_octupole   = transition_velocity_octupole
+    transition_magnetic_dipole     = transition_magnetic_dipole
+    transition_magnetic_quadrupole = transition_magnetic_quadrupole
+
+    as_scanner = as_scanner
+
+    def nuc_grad_method(self):
+        from pyscf.grad import tdrhf
+        return tdrhf.Gradients(self)
+
+    def _finalize(self):
+        '''Hook for dumping results and clearing up the object.'''
+        if not all(self.converged):
+            logger.note(self, 'TD-SCF states %s not converged.',
+                        [i for i, x in enumerate(self.converged) if not x])
+        logger.note(self, 'Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        return self
+
+class TDA(TDMixin):
+    '''Tamm-Dancoff approximation
+
+    Attributes:
+        conv_tol : float
+            Diagonalization convergence tolerance.  Default is 1e-9.
+        nstates : int
+            Number of TD states to be computed. Default is 3.
+
+    Saved results:
+
+        converged : bool
+            Diagonalization converged or not
+        e : 1D array
+            excitation energy for each excited state.
+        xy : A list of two 2D arrays
+            The two 2D arrays are Excitation coefficients X (shape [nocc,nvir])
+            and de-excitation coefficients Y (shape [nocc,nvir]) for each
+            excited state.  (X,Y) are normalized to 1/2 in RHF/RKS methods and
+            normalized to 1 for UHF/UKS methods. In the TDA calculation, Y = 0.
+    '''
+    def gen_vind(self, mf):
+        '''Compute Ax'''
+        return gen_tda_hop(mf, singlet=self.singlet, wfnsym=self.wfnsym)
+
     def init_guess(self, mf, nstates=None, wfnsym=None):
         if nstates is None: nstates = self.nstates
         if wfnsym is None: wfnsym = self.wfnsym
@@ -735,6 +781,7 @@ class TDA(lib.StreamObject):
         occidx = numpy.where(mo_occ==2)[0]
         viridx = numpy.where(mo_occ==0)[0]
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+        e_ia_max = e_ia.max()
 
         if wfnsym is not None and mf.mol.symmetry:
             if isinstance(wfnsym, str):
@@ -745,17 +792,22 @@ class TDA(lib.StreamObject):
             e_ia[(orbsym_in_d2h[occidx,None] ^ orbsym_in_d2h[viridx]) != wfnsym] = 1e99
 
         nov = e_ia.size
-        nroot = min(nstates, nov)
-        x0 = numpy.zeros((nroot, nov))
-        idx = numpy.argsort(e_ia.ravel())
-        for i in range(nroot):
-            x0[i,idx[i]] = 1  # Koopmans' excitations
+        nstates = min(nstates, nov)
+        e_ia = e_ia.ravel()
+        e_threshold = min(e_ia_max, e_ia[numpy.argsort(e_ia)[nstates-1]])
+        # Handle degeneracy, include all degenerated states in initial guess
+        e_threshold += 1e-6
+
+        idx = numpy.where(e_ia <= e_threshold)[0]
+        x0 = numpy.zeros((idx.size, nov))
+        for i, j in enumerate(idx):
+            x0[i, j] = 1  # Koopmans' excitations
         return x0
 
     def kernel(self, x0=None, nstates=None):
         '''TDA diagonalization solver
         '''
-        cpu0 = (time.clock(), time.time())
+        cpu0 = (logger.process_clock(), logger.perf_counter())
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -779,6 +831,7 @@ class TDA(lib.StreamObject):
                 lib.davidson1(vind, x0, precond,
                               tol=self.conv_tol,
                               nroots=nstates, lindep=self.lindep,
+                              max_cycle=self.max_cycle,
                               max_space=self.max_space, pick=pickeig,
                               verbose=log)
 
@@ -793,28 +846,8 @@ class TDA(lib.StreamObject):
             lib.chkfile.save(self.chkfile, 'tddft/xy', self.xy)
 
         log.timer('TDA', *cpu0)
-        log.note('Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        self._finalize()
         return self.e, self.xy
-
-    analyze = analyze
-    get_nto = get_nto
-    oscillator_strength = oscillator_strength
-
-    _contract_multipole = _contract_multipole  # needed by following methods
-    transition_dipole              = transition_dipole
-    transition_quadrupole          = transition_quadrupole
-    transition_octupole            = transition_octupole
-    transition_velocity_dipole     = transition_velocity_dipole
-    transition_velocity_quadrupole = transition_velocity_quadrupole
-    transition_velocity_octupole   = transition_velocity_octupole
-    transition_magnetic_dipole     = transition_magnetic_dipole
-    transition_magnetic_quadrupole = transition_magnetic_quadrupole
-
-    as_scanner = as_scanner
-
-    def nuc_grad_method(self):
-        from pyscf.grad import tdrhf
-        return tdrhf.Gradients(self)
 
 CIS = TDA
 
@@ -928,7 +961,7 @@ class TDHF(TDA):
     def kernel(self, x0=None, nstates=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
         '''
-        cpu0 = (time.clock(), time.time())
+        cpu0 = (logger.process_clock(), logger.perf_counter())
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -957,6 +990,7 @@ class TDHF(TDA):
                 lib.davidson_nosym1(vind, x0, precond,
                                     tol=self.conv_tol,
                                     nroots=nstates, lindep=self.lindep,
+                                    max_cycle=self.max_cycle,
                                     max_space=self.max_space, pick=pickeig,
                                     verbose=log)
 
@@ -976,7 +1010,7 @@ class TDHF(TDA):
             lib.chkfile.save(self.chkfile, 'tddft/xy', self.xy)
 
         log.timer('TDDFT', *cpu0)
-        log.note('Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
+        self._finalize()
         return self.e, self.xy
 
     def nuc_grad_method(self):
@@ -994,36 +1028,3 @@ scf.hf_symm.ROHF.TDA = None
 scf.hf_symm.ROHF.TDHF = None
 
 del(OUTPUT_THRESHOLD)
-
-
-if __name__ == '__main__':
-    from pyscf import scf
-    mol = gto.Mole()
-    mol.verbose = 0
-    mol.output = None
-
-    mol.atom = [
-        ['H' , (0. , 0. , .917)],
-        ['F' , (0. , 0. , 0.)], ]
-    mol.basis = '631g'
-    mol.build()
-
-    mf = scf.RHF(mol).run()
-    td = mf.TDA()
-    td.verbose = 3
-    print(td.kernel()[0] * 27.2114)
-# [ 11.90276464  11.90276464  16.86036434]
-
-    td.singlet = False
-    print(td.kernel()[0] * 27.2114)
-# [ 11.01747918  11.01747918  13.16955056]
-
-    td = mf.TDHF()
-    td.verbose = 3
-    print(td.kernel()[0] * 27.2114)
-# [ 11.83487199  11.83487199  16.66309285]
-
-    td.singlet = False
-    print(td.kernel()[0] * 27.2114)
-# [ 10.8919234   10.8919234   12.63440705]
-
