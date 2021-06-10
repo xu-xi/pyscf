@@ -71,18 +71,17 @@ class CDFT(KS):
 
     def first_order_de(self, f, mf):
         'The first order derivative of L w.r.t the Lagrange multiplier f'
-        mol = self.mol
-        index = self.mf_nuc.index(mf)
-        i = mf.mol.atom_index
-        self.f[i] = f
-        #fock = mf.get_fock(dm = self.dm_nuc)
-        h1n = mf.get_hcore(mol = mf.mol)
+        i = self.mf_nuc.index(mf)
+        ia = mf.mol.atom_index
+        self.f[ia] = f
+        h1 = mf.get_hcore(mol = mf.mol)
+        fock = mf.get_fock(h1e = h1, dm = self.dm_nuc[i])
         s1n = mf.get_ovlp()
-        energy, coeff = mf.eig(h1n, s1n)
+        energy, coeff = mf.eig(fock, s1n)
         occ = mf.get_occ(energy, coeff)
-        self.dm_nuc[index] = scf.hf.make_rdm1(coeff, occ)
+        self.dm_nuc[i] = scf.hf.make_rdm1(coeff, occ)
 
-        return numpy.einsum('i,xij,j->x', coeff[:,0].conj(), mf.mol.intor_symmetric('int1e_r', comp=3), coeff[:,0]) - mf.nuclei_expect_position
+        return numpy.einsum('xij,ji->x', mf.mol.intor_symmetric('int1e_r', comp=3), self.dm_nuc[i]) - mf.nuclei_expect_position
 
 
     def L_second_order(self):
@@ -239,11 +238,11 @@ class CDFT(KS):
             #if cycle >= 1: # using pre-converged density can be more stable
             for i in range(len(self.mf_nuc)):
                 mf = self.mf_nuc[i]
-                index = mf.mol.atom_index
+                ia = mf.mol.atom_index
                 #self.f = self.optimal_f(self.mf_nuc)
-                opt = scipy.optimize.root(self.first_order_de, self.f[index], args=mf, method=opt_method)
-                self.f[index] = opt.x
-                logger.info(self, 'f of %s(%i) atom: %s' %(self.mol.atom_symbol(index), index, self.f[index]))
+                opt = scipy.optimize.root(self.first_order_de, self.f[ia], args=mf, method=opt_method)
+                self.f[ia] = opt.x
+                logger.info(self, 'f of %s(%i) atom: %s' %(self.mol.atom_symbol(ia), ia, self.f[ia]))
                 logger.info(self, '1st de of L: %s', opt.fun)
                 self.mf_nuc[i].kernel(self.dm_nuc[i], dump_chk=None)
                 self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()

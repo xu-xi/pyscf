@@ -15,6 +15,8 @@ class Mole(gto.mole.Mole):
     >>> mol = neo.Mole()
     >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', quantum_nuc = [0,1], basis = 'ccpvdz')
     # H and C would be treated quantum mechanically
+    >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', basis = 'ccpvdz')
+    # All atoms are treated quantum mechanically by default
 
     '''
 
@@ -33,8 +35,14 @@ class Mole(gto.mole.Mole):
         elec.charge += quantum_nuclear_charge # charge determines the number of electrons
         return elec
 
-    def nuc_mole(self, atom_index, n, beta):
-        'return a Mole object for specified quantum nuclei, the default basis is even-tempered Gaussian basis'
+    def nuc_mole(self, atom_index):
+        '''
+        Return a Mole object for specified quantum nuclei. Default basis is even-tempered Gaussian basis.
+
+        H: 8s8p8d alpha=2\sqrt(2) beta=\sqrt(2)
+        other heavy atom: 12s12p12d alpha=2\sqrt(2)*mass beta=\sqrt(3)
+        '''
+
         nuc = gto.mole.copy(self) # a Mole object for quantum nuclei
         nuc.atom_index = atom_index
 
@@ -66,7 +74,7 @@ class Mole(gto.mole.Mole):
         #self.nuc.spin = self.nuc_num
         return nuc
 
-    def build(self, quantum_nuc = 'all', n = 8, beta = math.sqrt(2), **kwargs):
+    def build(self, quantum_nuc = 'all', **kwargs):
         'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
         gto.mole.Mole.build(self, **kwargs)
 
@@ -74,11 +82,11 @@ class Mole(gto.mole.Mole):
 
         if quantum_nuc == 'all':
             self.quantum_nuc = [True]*self.natm
-            logger.note(self, 'All atoms are treated quantum-mechanically by default.')
+            logger.info(self, 'All atoms are treated quantum-mechanically by default.')
         elif isinstance(quantum_nuc, list):
             for i in quantum_nuc:
                 self.quantum_nuc[i] = True
-                logger.note(self, 'The %s(%i) atom is treated quantum-mechanically' %(self.atom_symbol(i), i))
+                logger.info(self, 'The %s(%i) atom is treated quantum-mechanically' %(self.atom_symbol(i), i))
         else:
             raise TypeError('Unsupported parameter %s' %(quantum_nuc))
 
@@ -98,5 +106,5 @@ class Mole(gto.mole.Mole):
         self.nuc = []
         for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
-                self.nuc.append(self.nuc_mole(i, n, beta))
+                self.nuc.append(self.nuc_mole(i))
 

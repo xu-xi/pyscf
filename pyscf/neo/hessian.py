@@ -24,6 +24,8 @@ class Hessian(lib.StreamObject):
 
     >>> g = neo.Hessian(mf)
     >>> g.kernel()
+    >>> results = hess.harmonic_analysis(mol, h)
+    >>> print(results)
     '''
 
     def __init__(self, scf_method):

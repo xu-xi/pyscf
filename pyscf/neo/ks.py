@@ -14,16 +14,16 @@ class KS(HF):
     Example:
     >>> from pyscf import neo
     >>> mol = neo.Mole()
-    >>> mol.build(atom = 'H 0 0 0; F 0 0 0.917', basis = 'ccpvdz')
-    >>> mol.set_quantum_nuclei([0])
-    >>> mf = neo.KS(mol)
+    >>> mol.build(atom = 'H 0 0 0; F 0 0 0.917', basis = 'ccpvdz', quantum_nuc=[0])
+    >>> mf = neo.KS(mol, epc='17-2')
     >>> mf.scf()
     '''
 
-    def __init__(self, mol, unrestricted=False):
+    def __init__(self, mol, unrestricted=False, epc=None):
         HF.__init__(self, mol)
 
         self.unrestricted = unrestricted
+        self.epc = epc # electron-proton correlation: '17-1' or '17-2' can be used
 
         if self.unrestricted == True:
             self.mf_elec = dft.UKS(mol.elec)
@@ -31,7 +31,20 @@ class KS(HF):
             self.mf_elec = dft.RKS(mol.elec)
 
         self.mf_elec.xc = 'b3lyp' # use b3lyp as the default xc functional for electrons
-        self.epc = None # '17-1' or '17-2' can be used
+
+        for i in range(len(self.mol.nuc)):
+            ia = self.mol.nuc[i].atom_index
+            if self.epc is not None and self.mol.atom_symbol(ia) == 'H':  # only support electron-proton correlation
+                self.mf_nuc[i] = dft.RKS(self.mol.nuc[i])
+                self.mf_nuc[i].get_veff = self.get_veff_nuc_epc
+                #self.mf_nuc[i].conv_tol = 1e-8
+                #self.mf_nuc[i].verbose = self.verbose
+            else:
+                self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
+                self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
+
+            self.mf_nuc[i].occ_state = 0 # for delta SCF
+            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
 
 
     def build(self):
@@ -43,6 +56,7 @@ class KS(HF):
 
         # build grids (Note: high-density grids are needed since nuclei is more localized than electrons)
         self.mf_elec.grids.build(with_non0tab = False)
+        self.mf_elec.verbose = self.verbose - 1
 
         # pre-scf for electronic density
         if self.unrestricted == True:
@@ -51,26 +65,15 @@ class KS(HF):
             mf = dft.RKS(self.mol)
 
         mf.xc = self.mf_elec.xc
+        mf.verbose = self.verbose - 1
         mf.scf(dump_chk=False)
         self.dm_elec = mf.make_rdm1()
 
         # set up the Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
-            ia = self.mol.nuc[i].atom_index
-            if self.mol.atom_symbol(ia) == 'H' and self.epc is not None: # only support electron-proton correlation
-                self.mf_nuc[i] = dft.RKS(self.mol.nuc[i])
-                self.mf_nuc[i].get_veff = self.get_veff_nuc_epc
-                self.mf_nuc[i].conv_tol = 1e-8
-
-                #self.mf_nuc[i].verbose = self.verbose
-            else:
-                self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
-                self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
-
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
             self.mf_nuc[i].get_hcore = self.get_hcore_nuc
-            self.mf_nuc[i].occ_state = 0
-            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
+            self.mf_nuc[i].verbose = self.verbose - 1
             self.dm_nuc[i] = self.get_init_guess_nuc(self.mf_nuc[i])
 
 
