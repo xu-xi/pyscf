@@ -131,7 +131,7 @@ def make_ktuples_ibz(kpts, kpts_scaled=None, ntuple=2, tol=KPT_DIFF_TOL):
         if kpts.time_reversal:
             op_rot = np.concatenate([op_rot, -op_rot])
         bz2bz_ksks = map_k_tuples(kpts_scaled, op_rot, ntuple=ntuple, tol=tol)
-        bz2bz_ksks[: np.unique(np.where(bz2bz_ksks == -1)[1])] = -1
+        bz2bz_ksks[:, np.unique(np.where(bz2bz_ksks == -1)[1])] = -1
         nbzk2 = bz2bz_ksks.shape[0]
     else:
         bz2bz_ks = kpts.k2opk
