@@ -192,9 +192,9 @@ def check_mesh_symmetry(cell, ops, mesh=None, tol=SYMPREC):
                     \nRecommended mesh is %s', mesh1)
     return rm_list
 
-def _get_phase(cell, op, coords_scaled, kpt_scaled):
+def _get_phase(cell, op, coords_scaled, kpt_scaled, ignore_phase=False):
     natm = cell.natm
-    phase = np.zeros([natm], dtype = np.complex128)
+    phase = np.ones([natm], dtype = np.complex128)
     atm_map = np.arange(natm)
     coords0 = np.mod(coords_scaled, 1).round(-np.log10(SYMPREC).astype(int))
     coords0 = np.mod(coords0, 1)
@@ -209,13 +209,14 @@ def _get_phase(cell, op, coords_scaled, kpt_scaled):
         r_diff = coords_scaled[atm_map[iatm]] - op_dot_r
         #sanity check
         assert(np.linalg.norm(r_diff - r_diff.round()) < SYMPREC)
-        phase[iatm] = np.exp(-1j * np.dot(kpt_scaled, r_diff) * 2.0 * np.pi)
+        if not ignore_phase:
+            phase[iatm] = np.exp(-1j * np.dot(kpt_scaled, r_diff) * 2.0 * np.pi)
     return atm_map, phase
 
-def _get_rotation_mat(cell, kpt_scaled_ibz, mo_coeff_or_dm, op, Dmats):
+def _get_rotation_mat(cell, kpt_scaled_ibz, mo_coeff_or_dm, op, Dmats, ignore_phase=False):
     kpt_scaled = op.a2b(cell).dot_rot(kpt_scaled_ibz)
     coords = cell.get_scaled_positions()
-    atm_map, phases = _get_phase(cell, op, coords, kpt_scaled)
+    atm_map, phases = _get_phase(cell, op, coords, kpt_scaled, ignore_phase)
 
     dim = mo_coeff_or_dm.shape[0]
     mat = np.zeros([dim, dim], dtype=np.complex128)
