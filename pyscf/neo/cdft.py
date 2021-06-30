@@ -3,10 +3,10 @@
 '''
 Constrained nuclear-electronic orbital density functional theory
 '''
-import sys, numpy, scipy, copy
-from pyscf import scf
-from pyscf import gto
-from pyscf import dft 
+import numpy
+import scipy
+import copy
+from pyscf import scf 
 from pyscf.neo.ks import KS
 from pyscf.lib import logger
 from pyscf.data import nist
@@ -200,7 +200,8 @@ class CDFT(KS):
 
     def inner_scf(self, conv_tol = 1e-8, max_cycle = 20, opt_method = 'hybr', **kwargs):
         'the self-consistent field driver for the constrained DFT equation of quantum nuclei'
-        
+
+        cput0 = (logger.process_clock(), logger.perf_counter())
         self.build()
 
         self.mf_elec.kernel(self.dm_elec, dump_chk=None)
@@ -218,7 +219,7 @@ class CDFT(KS):
 
         E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
-
+        cput1 = logger.timer(self, 'initialize scf', *cput0)
         cycle = 0
 
         while not self.converged:
@@ -249,6 +250,7 @@ class CDFT(KS):
 
             E_tot = self.energy_tot(self.mf_elec, self.mf_nuc)
             logger.info(self, 'Cycle %i Total energy of cNEO: %.15g\n' %(cycle, E_tot))
+            cput1 = logger.timer(self, 'cycle= %d'%(cycle+1), *cput1)
 
             if abs(E_tot - E_last) < conv_tol:
                 self.converged = True
@@ -256,6 +258,8 @@ class CDFT(KS):
                 for i in range(len(self.mf_nuc)):
                     position = numpy.einsum('xij,ji->x', self.mol.nuc[i].intor_symmetric('int1e_r', comp=3), self.dm_nuc[i])
                     logger.info(self, 'Positional expectation value of the %i-th atom: %s', self.mol.nuc[i].atom_index, position)
+                
+                logger.timer(self, 'scf_cycle', *cput0)
                 return E_tot
 
     def nuc_grad_method(self):
