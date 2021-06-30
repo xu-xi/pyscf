@@ -26,7 +26,7 @@ from functools import reduce
 SYMPREC = getattr(__config__, 'pbc_symm_space_group_symprec', 1e-6)
 XYZ = np.eye(3)
 
-def transform_rot(op, a, b):
+def transform_rot(op, a, b, allow_non_integer=False):
     r'''
     Transform rotation operator from :math:`\mathbf{a}` basis system to :math:`\mathbf{b}` basis system.
 
@@ -40,6 +40,9 @@ def transform_rot(op, a, b):
             Basis vectors of :math:`\mathbf{a}` basis system (row-major).
         b : (3,3) array
             Basis vectors of :math:`\mathbf{b}` basis system (row-major).
+        allow_non_integer : bool
+            Whether to allow non-integer rotation matrix in the new basis system.
+            Defualt value is False.
 
     Returns:
         A (3,3) array
@@ -47,9 +50,12 @@ def transform_rot(op, a, b):
     '''
     P = np.dot(np.linalg.inv(b.T), a.T)
     R = reduce(np.dot,(P, op, np.linalg.inv(P))).round(15)
-    if(np.amax(np.absolute(R-R.round())) > SYMPREC):
-        raise RuntimeError("Point-group symmetries of the two coordinate systems are different.")
-    return R.round().astype(int)
+    if not allow_non_integer:
+        if(np.amax(np.absolute(R-R.round())) > SYMPREC):
+            raise RuntimeError("Point-group symmetries of the two coordinate systems are different.")
+        return R.round().astype(int)
+    else:
+        return R
 
 def transform_trans(op, a, b):
     r'''
@@ -115,11 +121,11 @@ class SpaceGroup_element():
         trans = -np.dot(self.trans, inv_rot.T)
         return SpaceGroup_element(inv_rot, trans)
 
-    def transform(self, a, b):
+    def transform(self, a, b, allow_non_integer=False):
         r'''
         Transform from :math:`\mathbf{a}` basis system to :math:`\mathbf{b}` basis system.
         '''
-        rot = transform_rot(self.rot, a, b)
+        rot = transform_rot(self.rot, a, b, allow_non_integer)
         trans = transform_trans(self.trans, a, b)
         return SpaceGroup_element(rot, trans)
 
@@ -202,7 +208,7 @@ class SpaceGroup_element():
         '''
         Transform from direct lattice system to Cartesian coordinate system.
         '''
-        return self.transform(cell.lattice_vectors(), XYZ)
+        return self.transform(cell.lattice_vectors(), XYZ, True)
 
     def b2a(self, cell):
         '''
