@@ -1,0 +1,29 @@
+#!/usr/bin/env python
+
+import numpy
+import unittest
+from pyscf import neo
+
+mol = neo.Mole()
+mol.build(atom='''H 0 0 0; C 0 0 1.064; N 0 0 2.220''', basis='ccpvdz', quantum_nuc=[0])
+
+class KnownValues(unittest.TestCase):
+    def test_scf_noepc(self):
+        mf = neo.CDFT(mol, epc=None)
+        self.assertAlmostEqual(mf.scf(), -93.3384022881535, 8)
+        self.assertTrue(numpy.allclose(mf.f[0], (-3.04933465e-16, -6.40788894e-17, -4.03031884e-02)))
+
+    def test_scf_epc17_1(self):
+        mf = neo.CDFT(mol, epc='17-1')
+        pass
+        #self.assertAlmostEqual(mf.scf(), , 9) 
+
+    def test_scf_epc17_2(self):
+        mf = neo.CDFT(mol, epc='17-2')
+        pass
+        #self.assertAlmostEqual(mf.scf(), , 9) 
+
+
+if __name__ == "__main__":
+    print("Full Tests for neo.cdft")
+    unittest.main()
