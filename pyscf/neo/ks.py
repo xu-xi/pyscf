@@ -25,13 +25,35 @@ class KS(HF):
         self.unrestricted = unrestricted
         self.epc = epc # electron-proton correlation: '17-1' or '17-2' can be used
 
+        # set up Hamiltonian for electrons
         if self.unrestricted == True:
             self.mf_elec = dft.UKS(mol.elec)
         else:
             self.mf_elec = dft.RKS(mol.elec)
 
         self.mf_elec.xc = 'b3lyp' # use b3lyp as the default xc functional for electrons
+        self.mf_elec.get_hcore = self.get_hcore_elec
+        if self.epc is not None:
+            self.mf_elec.get_veff = self.get_veff_elec_epc
 
+        # build grids (Note: high-density grids are needed since nuclei is more localized than electrons)
+        self.mf_elec.grids.build(with_non0tab = False)
+        self.mf_elec.verbose = self.verbose - 1
+
+        # pre-scf for electronic density
+       
+        if self.unrestricted == True:
+            mf = dft.UKS(self.mol)
+        else:
+            mf = dft.RKS(self.mol)
+
+        mf.xc = self.mf_elec.xc
+        mf.verbose = self.verbose - 1
+        mf.scf(dump_chk=False)
+        self.dm_elec = mf.make_rdm1()
+       
+
+        # set up Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
             ia = self.mol.nuc[i].atom_index
             if self.epc is not None and self.mol.atom_symbol(ia) == 'H':  # only support electron-proton correlation
@@ -45,32 +67,6 @@ class KS(HF):
 
             self.mf_nuc[i].occ_state = 0 # for delta SCF
             self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
-
-
-    def build(self):
-        'build the Hamiltonian for NEO-DFT'
-        
-        self.mf_elec.get_hcore = self.get_hcore_elec
-        if self.epc is not None:
-            self.mf_elec.get_veff = self.get_veff_elec_epc
-
-        # build grids (Note: high-density grids are needed since nuclei is more localized than electrons)
-        self.mf_elec.grids.build(with_non0tab = False)
-        self.mf_elec.verbose = self.verbose - 1
-
-        # pre-scf for electronic density
-        if self.unrestricted == True:
-            mf = dft.UKS(self.mol)
-        else:
-            mf = dft.RKS(self.mol)
-
-        mf.xc = self.mf_elec.xc
-        mf.verbose = self.verbose - 1
-        mf.scf(dump_chk=False)
-        self.dm_elec = mf.make_rdm1()
-
-        # set up the Hamiltonian for each quantum nuclei
-        for i in range(len(self.mol.nuc)):
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
             self.mf_nuc[i].get_hcore = self.get_hcore_nuc
             self.mf_nuc[i].verbose = self.verbose - 1
@@ -208,32 +204,16 @@ class KS(HF):
         vxc = lib.tag_array(veff + vmat, ecoul = veff.ecoul, exc = veff.exc, vj = veff.vj, vk = veff.vk)
         return vxc
 
-    def energy_tot(self):
-        'Total energy of NEO-DFT'
-        E_tot = 0
+    def energy_qmnuc(self, mf_nuc, h1n, dm_nuc):
+        'energy of quantum nuclei by NEO-DFT'
+        n1 = numpy.einsum('ij,ji', h1n, dm_nuc)
+        ia = mf_nuc.mol.atom_index
+        if self.mol.atom_symbol(ia) == 'H' and self.epc is not None:
+            veff = mf_nuc.get_veff(mf_nuc.mol, dm_nuc)
+            n1 += veff.exc
+        #logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(ia), n1)
+        return n1
 
-        self.dm_elec = self.mf_elec.make_rdm1()
-        for i in range(len(self.mf_nuc)):
-            self.dm_nuc[i] = self.mf_nuc[i].make_rdm1()
-
-        h1e = self.mf_elec.get_hcore(self.mf_elec.mol)
-        vhf = self.mf_elec.get_veff(self.mf_elec.mol, self.dm_elec)
-       
-        E_tot += self.mf_elec.energy_elec(dm = self.dm_elec, h1e = h1e, vhf = vhf)[0] 
-
-        for i in range(len(self.mf_nuc)):
-            ia = self.mf_nuc[i].mol.atom_index
-            h1n = self.mf_nuc[i].get_hcore(self.mf_nuc[i].mol)
-            n1 = numpy.einsum('ij,ji', h1n, self.dm_nuc[i])
-            logger.debug(self, 'Energy of quantum nuclei %s: %s', self.mol.atom_symbol(ia), n1)
-            E_tot += n1
-            if self.mol.atom_symbol(ia) == 'H' and self.epc is not None:
-                veff = self.mf_nuc[i].get_veff(self.mf_nuc[i].mol, self.dm_nuc[i])
-                E_tot += veff.exc
-
-        E_tot =  E_tot - self.elec_nuc_coulomb(self.dm_elec, self.dm_nuc) - self.nuc_nuc_coulomb(self.dm_nuc) + self.mf_elec.energy_nuc() # substract repeatedly counted terms
-
-        return E_tot
 
 
 
