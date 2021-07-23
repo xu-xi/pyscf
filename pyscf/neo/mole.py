@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import math
-import numpy 
 from pyscf import gto
 from pyscf.lib import logger
 
@@ -23,13 +22,19 @@ class Mole(gto.mole.Mole):
     def __init__(self, **kwargs):
         gto.mole.Mole.__init__(self, **kwargs)
 
+        self.quantum_nuc = [] # a list to assign which nuclei are treated quantum mechanically
+        self.nuc_num = 0 # the number of quantum nuclei
+        self.mass = [] # the mass of nuclei
+        self.elec = None # a Mole object for NEO-electron and classical nuclei
+        self.nuc = [] # a list of Mole objects for quantum nuclei
+
     def elec_mole(self):
         'return a Mole object for NEO-electron and classical nuclei'
 
-        elec = gto.mole.copy(self) # a Mole object for electrons
+        elec = gto.mole.copy(self) 
         quantum_nuclear_charge = 0
         for i in range(self.natm):
-            if self.quantum_nuc[i] == True:
+            if self.quantum_nuc[i] is True:
                 quantum_nuclear_charge -= elec._atm[i,0]
                 elec._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
         elec.charge += quantum_nuclear_charge # charge determines the number of electrons
@@ -39,48 +44,67 @@ class Mole(gto.mole.Mole):
         '''
         Return a Mole object for specified quantum nuclei. Default basis is even-tempered Gaussian basis.
 
-        H: 8s8p8d alpha=2\sqrt(2) beta=\sqrt(2)
-        other heavy atom: 12s12p12d alpha=2\sqrt(2)*mass beta=\sqrt(3)
+        H: 8s8p8d alpha=2*sqrt(2) beta=sqrt(2)
+        other heavy atom: 12s12p12d alpha=2*sqrt(2)*mass beta=sqrt(3)
         '''
 
         nuc = gto.mole.copy(self) # a Mole object for quantum nuclei
         nuc.atom_index = atom_index
 
+        # even-tempered basis
         alpha = 2*math.sqrt(2)*self.mass[atom_index]
-        
+
         if self.atom_symbol(atom_index) == 'H':
-            beta = math.sqrt(2)
-            n = 8
+            #beta = math.sqrt(2)
+            #n = 8
+            basis = gto.basis.parse('''
+                    H   S
+                    1.957   1.000
+                    H   S
+                    8.734   1.000
+                    H   S
+                    16.010  1.000
+                    H   S
+                    31.997  1.000
+                    H   P
+                    9.438   1.000
+                    H   P
+                    13.795  1.000
+                    H   P
+                    24.028  1.000
+                    H   D
+                    10.524   1.000
+                    H   D
+                    19.016  1.000
+                    ''')
         else:
             beta = math.sqrt(3)
             n = 12
+            basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
+
+        #logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
         
-        # even-tempered basis 
-        basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
-        logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
         nuc._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
         nuc._atm, nuc._bas, nuc._env = gto.mole.make_env(nuc._atom, nuc._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0
         for i in range(len(self.quantum_nuc)):
-            if self.quantum_nuc[i] == True:
+            if self.quantum_nuc[i] is True:
                 quantum_nuclear_charge -= nuc._atm[i,0]
                 nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
         nuc.charge += quantum_nuclear_charge
-        #nuc.charge = 2
         nuc.spin = 0 
         nuc.nelectron = 2 # avoid UHF
-        #self.nuc.nelectron = self.nuc_num
-        #self.nuc.spin = self.nuc_num
+
         return nuc
 
-    def build(self, quantum_nuc = 'all', **kwargs):
+    def build(self, quantum_nuc = 'all', nuc_basis = 'etbs', **kwargs):
         'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
         gto.mole.Mole.build(self, **kwargs)
 
         self.quantum_nuc = [False]*self.natm
 
-        if quantum_nuc == 'all':
+        if quantum_nuc is 'all':
             self.quantum_nuc = [True]*self.natm
             logger.info(self, 'All atoms are treated quantum-mechanically by default.')
         elif isinstance(quantum_nuc, list):
@@ -90,8 +114,7 @@ class Mole(gto.mole.Mole):
         else:
             raise TypeError('Unsupported parameter %s' %(quantum_nuc))
 
-        self.nuc_num = len([i for i in self.quantum_nuc if i == True]) 
-        logger.debug(self, 'The number of quantum nuclei: %s' %(self.quantum_nuc))
+        self.nuc_num = len([i for i in self.quantum_nuc if i == True])
 
         self.mass = self.atom_mass_list(isotope_avg=True)
         for i in range(len(self.mass)):
