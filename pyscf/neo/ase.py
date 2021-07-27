@@ -16,7 +16,7 @@ class Pyscf_NEO(Calculator):
                           'charge': 0,
                           'spin': 0,
                           'xc': 'b3lyp',
-                          'quantum_nuc': 'all'}  
+                          'quantum_nuc': 'all'}
 
 
     def __init__(self, **kwargs):
@@ -35,9 +35,10 @@ class Pyscf_NEO(Calculator):
             elif atoms[i] == 'D':
                 mol.atom.append(['H@2', tuple(positions[i])])
             else:
-                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])]) 
+                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
         mol.basis = self.parameters.basis
-        mol.build(quantum_nuc = self.parameters.quantum_nuc, charge = self.parameters.charge, spin = self.parameters.spin)
+        mol.build(quantum_nuc = self.parameters.quantum_nuc,
+                  charge = self.parameters.charge, spin = self.parameters.spin)
         if self.parameters.spin == 0:
             mf = neo.CDFT(mol)
         else:
@@ -52,7 +53,7 @@ class Pyscf_NEO(Calculator):
         for i in range(len(mf.mf_nuc)):
             ia = mf.mf_nuc[i].mol.atom_index
             dip_nuc += mol.atom_charge(ia) * mf.mf_nuc[i].nuclei_expect_position * nist.AU2DEBYE
-        
+
         self.results['dipole'] = dip_elec + dip_nuc
 
 
@@ -64,7 +65,7 @@ class Pyscf_DFT(Calculator):
                           'charge': 0,
                           'spin': 0,
                           'xc': 'b3lyp',
-                         }  
+                          }
 
 
     def __init__(self, **kwargs):
@@ -94,5 +95,5 @@ class Pyscf_DFT(Calculator):
         self.results['forces'] = -g.grad()*Hartree/Bohr
         self.results['dipole'] = dip_moment(mol, mf.make_rdm1())
 
-        
+
 

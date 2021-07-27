@@ -4,7 +4,7 @@
 Constrained nuclear-electronic orbital density functional theory
 '''
 import numpy
-from pyscf import scf 
+from pyscf import scf
 from pyscf.neo.ks import KS
 
 
@@ -22,7 +22,7 @@ class CDFT(KS):
         self.f = [numpy.zeros(3)] * mol.natm
         KS.__init__(self, mol, **kwargs)
         #self.scf = self.inner_scf
-        
+
         # set up the Hamiltonian for each quantum nuclei in cNEO
         for i in range(len(self.mol.nuc)):
             mf = self.mf_nuc[i]
@@ -38,7 +38,7 @@ class CDFT(KS):
         h += numpy.einsum('xij,x->ij', mol.intor_symmetric('int1e_r', comp=3), self.f[ia])
 
         return h
-    
+
     def first_order_de(self, f, mf):
         'The first order derivative of L w.r.t the Lagrange multiplier f'
         i = self.mf_nuc.index(mf)

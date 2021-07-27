@@ -11,7 +11,7 @@ energy = mf.scf()
 
 class KnownValues(unittest.TestCase):
     def test_scf(self):
-        self.assertAlmostEqual(energy, -92.8437063380073, 9)
+        self.assertAlmostEqual(energy, -92.8437063572664, 8)
 
 if __name__ == "__main__":
     print("Full Tests for neo.hf")

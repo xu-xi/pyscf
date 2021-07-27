@@ -41,8 +41,8 @@ class Hessian(lib.StreamObject):
         'Hessian of electrons and classic nuclei in cNEO'
         hobj = self.base.mf_elec.Hessian()
         de2 = hobj.hess_elec(mo1 = mo1_e, mo_e1 = e1_e) + hobj.hess_nuc()
-        return de2 
- 
+        return de2
+
     def hess_elec_nuc1(self, i, mo1_n, mo1_e):
         'part of hessian for Coulomb interactions between electrons and the i-th quantum nuclei'
         de2 = numpy.zeros((self.mol.natm, self.mol.natm, 3, 3))
@@ -69,21 +69,26 @@ class Hessian(lib.StreamObject):
             shls_slice = (shl0, shl1) + (0, self.mol.elec.nbas) + (0, nuc.nbas)*2
 
             v1ao = numpy.zeros((3, nao_e, nao_e))
-            v1en_ao = -scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
+            v1en_ao = -scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n,
+                                     scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
             v1ao[:, p0:p1] += v1en_ao[:, p0:p1]
             v1ao[:, :, p0:p1] += v1en_ao[:, p0:p1].transpose(0, 2, 1)
 
-            v1en_ao2 = -scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_e[:,p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1', shls_slice=shls_slice, comp=3, aosym='s2kl')*2
+            v1en_ao2 = -scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc),
+                                      dm0_e[:,p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1', shls_slice=shls_slice, comp=3, aosym='s2kl')*2
 
             if ia == index:
-                v1en_ao3 = -scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n, scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
-                v1en_ao4 = -scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_e, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
+                v1en_ao3 = -scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n,
+                                          scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
+                v1en_ao4 = -scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_e,
+                                          scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
                 v1en_ao4 += v1en_ao4.transpose(0, 2, 1)
 
             for j0 in range(i0+1):
                 ja = self.atmlst[j0]
                 dm1_e = numpy.einsum('ypi, qi->ypq', mo1_e[ja], mocc_e)
-                de2[i0, j0] -= numpy.einsum('xpq, ypq->xy', v1ao, dm1_e)*4 # *2 for c.c. and *2 for double occupancy of electrons
+                # *2 for c.c. and *2 for double occupancy of electrons
+                de2[i0, j0] -= numpy.einsum('xpq, ypq->xy', v1ao, dm1_e)*4
                 dm1_n = numpy.einsum('ypi, qi->ypq', mo1_n[ja], mocc_n)
                 de2[i0, j0] -= numpy.einsum('xpq, ypq->xy', v1en_ao2, dm1_n)*2
                 if ia == index:
@@ -92,7 +97,7 @@ class Hessian(lib.StreamObject):
 
             for j0 in range(i0):
                 de2[j0, i0] = de2[i0, j0].T
-        return de2*charge 
+        return de2*charge
 
     def hess_elec_nuc2(self, i):
         'part of hessian for Coulomb interactions between electrons and the i-th quantum nuclei'
@@ -114,10 +119,12 @@ class Hessian(lib.StreamObject):
         nao_n, nmo_n = mf_nuc.mo_coeff.shape
         i = self.atmlst.index(index)
 
-        hess_naa = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_e, scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
+        hess_naa = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_e,
+                                 scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
         hess_naa += hess_naa.transpose(0, 2, 1)
 
-        hess_eaa = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n, scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
+        hess_eaa = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n,
+                                 scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
 
         for i0, ia in enumerate(self.atmlst):
             shl0, shl1, p0, p1 = aoslices[ia]
@@ -127,23 +134,27 @@ class Hessian(lib.StreamObject):
             if ia == index:
                 de2[i0, i0] -= numpy.einsum('xpq, pq->x', hess_naa, dm0_n).reshape(3, 3)
 
-            hess_eaeb = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n, scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9)
+            hess_eaeb = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_n,
+                                      scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9)
 
             for j0, ja in enumerate(self.atmlst[:i0+1]):
                 q0, q1 = aoslices[ja][2:]
                 de2[i0,j0] -= numpy.einsum('xpq,pq->x', hess_eaeb[:,p0:p1,q0:q1], dm0_e[p0:p1,q0:q1]).reshape(3, 3)*2
                 if index == ia:
                     test = numpy.zeros((9, nao_e, nao_e))
-                    hess_naeb = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n, scripts='ijkl,ji->kl', intor='int2e_ip1ip2', comp=9)
+                    hess_naeb = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n,
+                                              scripts='ijkl,ji->kl', intor='int2e_ip1ip2', comp=9)
                     test[:, q0:q1] += hess_naeb[:, q0:q1]
                     test[:, :, q0:q1] += hess_naeb[:, q0:q1].transpose(0, 2, 1)
                     de2[i0, j0] -= numpy.einsum('xpq,pq->x', test, dm0_e).reshape(3,3)*2
 
                 if index == ja:
-                    hess_eanb = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc), dm0_e[:, p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1ip2', shls_slice=shls_slice, comp=9)
+                    hess_eanb = scf.jk.get_jk((self.mol.elec, self.mol.elec, nuc, nuc),
+                                              dm0_e[:, p0:p1], scripts='ijkl,ji->kl', intor='int2e_ip1ip2', shls_slice=shls_slice, comp=9)
                     de2[i0, j0] -= numpy.einsum('xpq,pq->x', hess_eanb, dm0_n).reshape(3, 3)*4
                 if index == ia and index == ja:
-                    hess_nanb = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n, scripts='ijkl,ji->kl', intor='int2e_ipvip1', comp=9)
+                    hess_nanb = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_n,
+                                              scripts='ijkl,ji->kl', intor='int2e_ipvip1', comp=9)
                     de2[i0, j0] -= numpy.einsum('xpq,pq->x', hess_nanb, dm0_e).reshape(3, 3)*2
 
             for j0 in range(i0):
@@ -189,18 +200,18 @@ class Hessian(lib.StreamObject):
 
             for j0 in range(i0+1):
                 ja = self.atmlst[j0]
-                #if ia == index: # test
+                # if ia == index: # test
                 #    de2[i0, j0] -= f1[ja]
-               
+
                 dm1_n = numpy.einsum('ypi,qi->ypq', mo1_n[ja], mocc)
 
                 de2[i0, j0] += numpy.einsum('xpq,ypq->xy', h1a, dm1_n)*2 # *2 for c.c. of dm1
 
                 r1a_f = numpy.einsum('xypq, y->xpq', r1a, self.base.f[index])
-                de2[i0, j0] += numpy.einsum('xpq,ypq->xy', r1a_f, dm1_n)*2 
+                de2[i0, j0] += numpy.einsum('xpq,ypq->xy', r1a_f, dm1_n)*2
 
                 r1a_dm = numpy.einsum('xzpq, pq->xz', r1a, dm0_n)
-                #de2[i0, j0] += numpy.einsum('xz, zy->xy', r1a_dm, f1[ja]) # test: yz or zy?
+                # de2[i0, j0] += numpy.einsum('xz, zy->xy', r1a_dm, f1[ja]) # test: yz or zy?
 
                 dm1_n = numpy.einsum('ypi,qi,i->ypq', mo1_n[ja], mocc, mo_energy[mo_occ>0])
                 de2[i0, j0] -= numpy.einsum('xpq,ypq->xy', s1ao, dm1_n)*2
@@ -221,7 +232,7 @@ class Hessian(lib.StreamObject):
         i = self.atmlst.index(index)
         mass = self.mol.mass[index] * nist.ATOMIC_MASS/nist.E_MASS
         charge = self.mol.atom_charge(index)
-                
+
         mo_energy = mf_nuc.mo_energy
         mo_coeff = mf_nuc.mo_coeff
         mo_occ = mf_nuc.mo_occ
@@ -253,7 +264,7 @@ class Hessian(lib.StreamObject):
                 de2[i0, i0] -= numpy.einsum('xypq, pq->xy', s1aa, dme0)
                 de2[i0, i0] += numpy.einsum('xypq, pq->xy', r1aa, dm0_n)
 
-                #for j0, ja in enumerate(self.atmlst):
+                # for j0, ja in enumerate(self.atmlst):
                 for j0 in range(i0+1):
                     ja = self.atmlst[j0]
                     if self.mol.quantum_nuc[ja] == False:
@@ -265,18 +276,22 @@ class Hessian(lib.StreamObject):
                         de2[i0, j0] += numpy.einsum('xypq,pq->xy', rinv_ab, dm0_n)*2
 
             # test: hessian for quantum-classsical nuclei replusions
-            elif self.mol.quantum_nuc[ia] == False:      
+            elif self.mol.quantum_nuc[ia] == False:
                 with mf_nuc.mol.with_rinv_at_nucleus(ia):
-                    rinv_aa = mf_nuc.mol.intor('int1e_ipiprinv', comp=9).reshape(3, 3, nao, nao)*charge*self.mol.atom_charge(ia)
-                    rinv_aa += mf_nuc.mol.intor('int1e_iprinvip', comp=9).reshape(3, 3, nao, nao)*charge*self.mol.atom_charge(ia)
+                    rinv_aa = mf_nuc.mol.intor('int1e_ipiprinv', comp=9).reshape(
+                        3, 3, nao, nao)*charge*self.mol.atom_charge(ia)
+                    rinv_aa += mf_nuc.mol.intor('int1e_iprinvip', comp=9).reshape(3, 3,
+                                                                                  nao, nao)*charge*self.mol.atom_charge(ia)
                 de2[i0, i0] += numpy.einsum('xypq,pq->xy', rinv_aa, dm0_n)*2
 
                 for j0 in range(i0+1):
                     ja = self.atmlst[j0]
                     if ja == index:
                         with mf_nuc.mol.with_rinv_as_nucleus(ia):
-                            rinv_ab = -mf_nuc.mol.intor('int1e_ipiprinv', comp=9).reshape(3, 3, nao, nao)*charge*self.mol.atom_charge(ia)
-                            rinv_ab -= mf_nuc.mol.intor('int1e_iprinvip', comp=9).reshape(3, 3, nao, nao)*charge*self.mol.atom_charge(ia)
+                            rinv_ab = -mf_nuc.mol.intor('int1e_ipiprinv', comp=9).reshape(3,
+                                                                                          3, nao, nao)*charge*self.mol.atom_charge(ia)
+                            rinv_ab -= mf_nuc.mol.intor('int1e_iprinvip', comp=9).reshape(3,
+                                                                                          3, nao, nao)*charge*self.mol.atom_charge(ia)
                         de2[i0, j0] += numpy.einsum('xypq,pq->xy', rinv_ab, dm0_n)*2
 
             for j0 in range(i0):
@@ -308,16 +323,22 @@ class Hessian(lib.StreamObject):
                             v1 = numpy.zeros((3, nao_j, nao_j))
                             v2 = numpy.zeros((3, nao_i, nao_i))
                             if ia == index1:
-                                v1 = -scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[i], scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
-                                v2 = -scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
+                                v1 = -scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]),
+                                                    self.base.dm_nuc[i], scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
+                                v2 = -scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]),
+                                                    self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
                                 v2 += v2.transpose(0, 2, 1)
                             elif ia == index2:
-                                v1 = -scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
+                                v1 = -scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]),
+                                                    self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
                                 v1 += v1.transpose(0, 2, 1)
-                                v2 = -scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[j], scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
+                                v2 = -scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]),
+                                                    self.base.dm_nuc[j], scripts='ijkl,ji->kl', intor='int2e_ip1', comp=3, aosym='s2kl')*2
 
-                            de2[i0, j0] += numpy.einsum('xpq,ypq->xy', v1, dm1_j)*self.mol.atom_charge(index1)*self.mol.atom_charge(index2)*2 
-                            de2[i0, j0] += numpy.einsum('xpq,ypq->xy', v2, dm1_i)*self.mol.atom_charge(index1)*self.mol.atom_charge(index2)*2 
+                            de2[i0, j0] += numpy.einsum('xpq,ypq->xy', v1, dm1_j)* \
+                                                        self.mol.atom_charge(index1)*self.mol.atom_charge(index2)*2
+                            de2[i0, j0] += numpy.einsum('xpq,ypq->xy', v2, dm1_i)* \
+                                                        self.mol.atom_charge(index1)*self.mol.atom_charge(index2)*2
 
                         for j0 in range(i0):
                             de2[j0, i0] = de2[i0, j0].T
@@ -339,24 +360,34 @@ class Hessian(lib.StreamObject):
                             charge = self.mol.atom_charge(index_i)*self.mol.atom_charge(index_j)
                             if ia == index_i:
                                 if ja == index_i:
-                                    v2_aa = scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
-                                    v2_aa += scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9, aosym='s2kl')
+                                    v2_aa = scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]),
+                                                          self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
+                                    v2_aa += scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]),
+                                                           self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9, aosym='s2kl')
                                     v2_aa += v2_aa.transpose(0, 2, 1)
-                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_aa, self.base.dm_nuc[i]).reshape(3, 3)*charge
+                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_aa,
+                                                                self.base.dm_nuc[i]).reshape(3, 3)*charge
                                 elif ja == index_j:
-                                    v2_ab = scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]), self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1ip2', comp=9)*2
+                                    v2_ab = scf.jk.get_jk((self.mol.nuc[i], self.mol.nuc[i], self.mol.nuc[j], self.mol.nuc[j]),
+                                                          self.base.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1ip2', comp=9)*2
                                     v2_ab += v2_ab.transpose(0, 2, 1)
-                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_ab, self.base.dm_nuc[i]).reshape(3, 3)*charge
+                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_ab,
+                                                                self.base.dm_nuc[i]).reshape(3, 3)*charge
                             elif ia == index_j:
                                 if ja == index_j:
-                                    v2_aa = scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
-                                    v2_aa += scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9, aosym='s2kl')
+                                    v2_aa = scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]),
+                                                          self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ipip1', comp=9, aosym='s2kl')
+                                    v2_aa += scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]),
+                                                           self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ipvip1', comp=9, aosym='s2kl')
                                     v2_aa += v2_aa.transpose(0, 2, 1)
-                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_aa, self.base.dm_nuc[j]).reshape(3, 3)*charge
+                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_aa,
+                                                                self.base.dm_nuc[j]).reshape(3, 3)*charge
                                 elif ja == index_i:
-                                    v2_ab = scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]), self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1ip2', comp=9)*2
+                                    v2_ab = scf.jk.get_jk((self.mol.nuc[j], self.mol.nuc[j], self.mol.nuc[i], self.mol.nuc[i]),
+                                                          self.base.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1ip2', comp=9)*2
                                     v2_ab += v2_ab.transpose(0, 2, 1)
-                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_ab, self.base.dm_nuc[j]).reshape(3, 3)*charge
+                                    de2[i0, j0] += numpy.einsum('xpq,pq->x', v2_ab,
+                                                                self.base.dm_nuc[j]).reshape(3, 3)*charge
                         for j0 in range(i0):
                             de2[j0,i0] = de2[i0,j0].T
 
@@ -367,7 +398,7 @@ class Hessian(lib.StreamObject):
     def kernel(self):
         cphf = CPHF(self.base)
         mo1_e, e1_e, mo1_n, e1_n, f1 = cphf.kernel()
-        
+
         mo_coeff_e = self.base.mf_elec.mo_coeff
         mo_occ_e = self.base.mf_elec.mo_occ
         nao_e, nmo_e = mo_coeff_e.shape
@@ -413,7 +444,7 @@ class Hessian(lib.StreamObject):
     def harmonic_analysis(self, mol, hess, exclude_trans=True, exclude_rot=True,
                           imaginary_freq=True):
         '''Each column is one mode
-        
+
         imaginary_freq (boolean): save imaginary_freq as complex number (if True)
         or negative real number (if False)
         copy from pyscf.hessian.thermo
@@ -478,7 +509,7 @@ class Hessian(lib.StreamObject):
         results['force_const_au'] = force_const_au
         results['force_const_dyne'] = reduced_mass * force_const_au * dyne  #cm^-1/a0^2
 
-        #TODO: IR intensity
+        # TODO: IR intensity
         return results
 
 

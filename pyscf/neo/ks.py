@@ -41,7 +41,7 @@ class KS(HF):
         self.mf_elec.verbose = self.verbose - 1
 
         # pre-scf for electronic density
-       
+
         if self.unrestricted == True:
             mf = dft.UKS(self.mol)
         else:
@@ -51,7 +51,7 @@ class KS(HF):
         mf.verbose = self.verbose - 1
         mf.scf(dump_chk=False)
         self.dm_elec = mf.make_rdm1()
-       
+
 
         # set up Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
@@ -66,7 +66,7 @@ class KS(HF):
                 self.mf_nuc[i].get_veff = self.get_veff_nuc_bare
 
             self.mf_nuc[i].occ_state = 0 # for delta SCF
-            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i]) 
+            self.mf_nuc[i].get_occ = self.get_occ_nuc(self.mf_nuc[i])
             self.mf_nuc[i].get_init_guess = self.get_init_guess_nuc
             self.mf_nuc[i].get_hcore = self.get_hcore_nuc
             self.mf_nuc[i].verbose = self.verbose - 1
@@ -116,21 +116,21 @@ class KS(HF):
         vxc = numpy.multiply(numerator, 1/denominator)
 
         return exc, vxc
-            
+
     def get_veff_nuc_epc(self, mol, dm, dm_last=None, vhf_last=None, hermi=1):
-    #def nr_rks_nuc(self, mol, dm):
+        # def nr_rks_nuc(self, mol, dm):
         'get the effective potential for proton of NEO-DFT'
 
         nao = mol.nao_nr()
         shls_slice = (0, mol.nbas)
         ao_loc = mol.ao_loc_nr()
-        nnuc = 0 
+        nnuc = 0
         excsum = 0
         vmat = numpy.zeros((nao, nao))
 
-        grids = self.mf_elec.grids 
+        grids = self.mf_elec.grids
         ni = self.mf_elec._numint
-        
+
         aow = None
         for ao, mask, weight, coords in ni.block_loop(mol, grids, nao):
             aow = numpy.ndarray(ao.shape, order='F', buffer=aow)
@@ -146,9 +146,9 @@ class KS(HF):
             den = rho_nuc * weight
             nnuc += den.sum()
             excsum += numpy.dot(den, exc)
-            aow = _scale_ao(ao_nuc, .5*weight*vxc, out=aow) # *0.5 because vmat + vmat.T 
+            aow = _scale_ao(ao_nuc, .5*weight*vxc, out=aow) # *0.5 because vmat + vmat.T
             vmat += _dot_ao_ao(mol, ao_nuc, aow, mask, shls_slice, ao_loc)
-        
+
         logger.debug(self, 'the number of nuclei: %.5f', nnuc)
         vmat += vmat.conj().T
         vmat = lib.tag_array(vmat, exc=excsum, ecoul=0, vj=0, vk=0)

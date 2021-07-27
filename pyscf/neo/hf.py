@@ -16,10 +16,10 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
 
     Generate density matrix with broken spatial and spin symmetry by mixing
     HOMO and LUMO orbitals following ansatz in Szabo and Ostlund, Sec 3.8.7.
-    
+
     psi_1a = numpy.cos(q)*psi_homo + numpy.sin(q)*psi_lumo
     psi_1b = numpy.cos(q)*psi_homo - numpy.sin(q)*psi_lumo
-        
+
     psi_2a = -numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
     psi_2b =  numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
 
@@ -27,8 +27,8 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
         Density matrices, a list of 2D ndarrays for alpha and beta spins
     '''
     # opt: q, mixing parameter 0 < q < 2 pi
-    
-    #based on init_guess_by_1e
+
+    # based on init_guess_by_1e
     h1e = scf.hf.get_hcore(mol)
     s1e = scf.hf.get_ovlp(mol)
     mo_energy, mo_coeff = scf.hf.eig(h1e, s1e)
@@ -45,12 +45,12 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
 
     psi_homo=mo_coeff[:, homo_idx]
     psi_lumo=mo_coeff[:, lumo_idx]
-    
+
     Ca=numpy.zeros_like(mo_coeff)
     Cb=numpy.zeros_like(mo_coeff)
 
 
-    #mix homo and lumo of alpha and beta coefficients
+    # mix homo and lumo of alpha and beta coefficients
     q=mixing_parameter
 
     for k in range(mo_coeff.shape[0]):
@@ -66,21 +66,21 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
         Cb[:,k]=mo_coeff[:,k]
 
     dm =scf.UHF(mol).make_rdm1( (Ca,Cb), (mo_occ,mo_occ) )
-    return dm 
+    return dm
 
 
 
 class HF(scf.hf.SCF):
     '''Hartree Fock for NEO
-    
+
     Example:
-    
+
     >>> from pyscf import neo
     >>> mol = neo.Mole()
     >>> mol.build(atom = 'H 0 0 0; F 0 0 0.917', basis = 'ccpvdz')
     >>> mf = neo.HF(mol)
     >>> mf.scf()
-    
+
     '''
 
     def __init__(self, mol, unrestricted = False):
@@ -103,7 +103,7 @@ class HF(scf.hf.SCF):
         # set up the Hamiltonian for quantum nuclei
         self.mf_nuc = [None] * self.mol.nuc_num
         self.dm_nuc = [None] * self.mol.nuc_num
-        
+
         for i in range(len(self.mol.nuc)):
             self.mf_nuc[i] = scf.RHF(self.mol.nuc[i])
             self.mf_nuc[i].occ_state = 0 # for delta-SCF
@@ -126,20 +126,20 @@ class HF(scf.hf.SCF):
 
         # Coulomb interactions between quantum nucleus and electrons
         if self.unrestricted == True:
-            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), \
-                self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * charge
-            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), \
-                self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * charge
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
+                               self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * charge
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
+                               self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * charge
         else:
-            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec), \
-                self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * charge
+            h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
+                               self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
             ja = self.mol.nuc[j].atom_index
             if ja != ia and isinstance(self.dm_nuc[j], numpy.ndarray):
-                h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]), \
-                    self.dm_nuc[j], scripts='ijkl,lk->ij')*charge*self.mol.atom_charge(ja)
+                h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]),
+                                   self.dm_nuc[j], scripts='ijkl,lk->ij')*charge*self.mol.atom_charge(ja)
 
         return h
 
@@ -176,7 +176,7 @@ class HF(scf.hf.SCF):
         nuc_occ = mf_nuc.get_occ(nuc_energy, nuc_coeff)
 
         return scf.hf.make_rdm1(nuc_coeff, nuc_occ)
-    
+
     def get_hcore_elec(self, mole=None):
         'Get the core Hamiltonian for electrons in NEO'
         if mole == None:
@@ -188,8 +188,8 @@ class HF(scf.hf.SCF):
             ia = self.mol.nuc[i].atom_index
             charge = self.mol.atom_charge(ia)
             if isinstance(self.dm_nuc[i], numpy.ndarray):
-                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]), \
-                    self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
+                j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]),
+                                   self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
 
         return scf.hf.get_hcore(mole) + j
 
@@ -218,8 +218,8 @@ class HF(scf.hf.SCF):
             ia = mol.nuc[i].atom_index
             charge = mol.atom_charge(ia)
 
-            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]), \
-                dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
+            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]),
+                                    dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
 
         if self.unrestricted == True:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
@@ -237,13 +237,13 @@ class HF(scf.hf.SCF):
             for j in range(len(dm_nuc)):
                 if j != i:
                     ja = mol.nuc[j].atom_index
-                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]), \
-                        dm_nuc[j], scripts='ijkl,lk->ij', aosym='s4') \
+                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
+                                           dm_nuc[j], scripts='ijkl,lk->ij', aosym='s4') \
                             * mol.atom_charge(ia) * mol.atom_charge(ja)
                     E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
 
         logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E*.5) # double counted
-        return E*.5 
+        return E*.5
 
     def energy_qmnuc(self, mf_nuc, h1n, dm_nuc):
         'the energy of quantum nucleus'
@@ -253,12 +253,12 @@ class HF(scf.hf.SCF):
         logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(ia), n1)
 
         return n1
-        
+
     def energy_tot(self, dm_elec=None, dm_nuc=None, h1e=None, vhf=None, h1n=None):
         'Total energy of NEO-HF'
         E_tot = 0
 
-        # add the energy of electrons 
+        # add the energy of electrons
         if dm_elec is None:
             dm_elec = self.mf_elec.make_rdm1()
         if dm_nuc is None:
@@ -285,7 +285,7 @@ class HF(scf.hf.SCF):
 
         # substract repeatedly counted terms and add classical nuclear replusion
         E_tot =  E_tot - self.elec_nuc_coulomb(dm_elec, dm_nuc) - self.nuc_nuc_coulomb(dm_nuc) \
-            + self.mf_elec.energy_nuc() 
+            + self.mf_elec.energy_nuc()
 
         return E_tot
 
@@ -319,12 +319,12 @@ class HF(scf.hf.SCF):
                 # optimize f in cNEO
                 if isinstance(self, neo.CDFT):
                     ia = self.mf_nuc[i].mol.atom_index
-                    opt = scipy.optimize.root(self.first_order_de, self.f[ia], args=self.mf_nuc[i], method='hybr')#, options={'maxfev':1})
+                    opt = scipy.optimize.root(self.first_order_de, self.f[ia], args=self.mf_nuc[i], method='hybr')
                     self.f[ia] = opt.x
 
                     logger.info(self, 'f of %s(%i) atom: %s' %(self.mf_nuc[i].mol.atom_symbol(ia), ia, self.f[ia]))
                     logger.info(self, '1st de of L: %s', opt.fun)
-                    
+
             E_tot = self.energy_tot(self.dm_elec, self.dm_nuc)
             logger.info(self, 'Cycle %i Total Energy of NEO: %s\n' %(cycle, E_tot))
             cput1 = logger.timer(self, 'cycle= %d'%(cycle), *cput1)
@@ -334,7 +334,7 @@ class HF(scf.hf.SCF):
                 logger.note(self, 'converged NEO energy = %.15g', E_tot)
                 logger.timer(self, 'scf_cycle', *cput0)
                 return E_tot
-    
+
     def scf2(self, conv_tol = 1e-9, max_cycle = 60):
         '(beta) scf cycle'
 
@@ -350,7 +350,7 @@ class HF(scf.hf.SCF):
 
         # DIIS for quantum nuclei
         #mf_diis_n = [None] * self.mol.nuc_num
-        #for i in range(self.mol.nuc_num):
+        # for i in range(self.mol.nuc_num):
         #    mf_diis_n[i] = self.mf_nuc[i].DIIS(self.mf_nuc[i], self.mf_nuc[i].diis_file)
         #    mf_diis_n[i].space = self.mf_nuc[i].diis_space
         #    mf_diis_n[i].rollback = self.mf_nuc[i].diis_space_rollback
@@ -370,14 +370,14 @@ class HF(scf.hf.SCF):
             cycle += 1
             if cycle > max_cycle:
                 raise RuntimeError('SCF is not convergent within %i cycles' %(max_cycle))
-            
+
             E_last = E_tot
 
             # set up electronic Hamiltonian and diagonalize it
             h1e = self.mf_elec.get_hcore()
             vhf = self.mf_elec.get_veff(self.mf_elec.mol, dm=self.dm_elec)
-            fock_e = self.mf_elec.get_fock(h1e, s1e, vhf, 
-                    self.dm_elec, cycle, mf_diis)
+            fock_e = self.mf_elec.get_fock(h1e, s1e, vhf,
+                                           self.dm_elec, cycle, mf_diis)
             mo_energy_e, mo_coeff_e = scf.hf.eig(fock_e, s1e)
             mo_occ_e = self.mf_elec.get_occ(mo_energy_e, mo_coeff_e)
             self.dm_elec = self.mf_elec.make_rdm1(mo_coeff_e, mo_occ_e)
@@ -387,7 +387,7 @@ class HF(scf.hf.SCF):
                 # optimize f in cNEO
                 if isinstance(self, neo.CDFT):
                     ia = self.mf_nuc[i].mol.atom_index
-                    opt = scipy.optimize.root(self.first_order_de, self.f[ia], args=self.mf_nuc[i], method='hybr')#, options={'maxfev':1})
+                    opt = scipy.optimize.root(self.first_order_de, self.f[ia], args=self.mf_nuc[i], method='hybr')
                     self.f[ia] = opt.x
 
                     logger.info(self, 'f of %s(%i) atom: %s' %(self.mf_nuc[i].mol.atom_symbol(ia), ia, self.f[ia]))
@@ -395,8 +395,8 @@ class HF(scf.hf.SCF):
 
                 h1n[i] = self.mf_nuc[i].get_hcore(self.mf_nuc[i].mol)
                 veff_n = self.mf_nuc[i].get_veff(self.mf_nuc[i].mol, self.dm_nuc[i])
-                
-                #fock_n = self.mf_nuc[i].get_fock(h1n[i], s1n[i], veff_n, 
+
+                # fock_n = self.mf_nuc[i].get_fock(h1n[i], s1n[i], veff_n,
                 #        self.dm_nuc[i], cycle, mf_diis_n[i])
                 mo_energy_n, mo_coeff_n = scf.hf.eig(h1n[i] + veff_n, s1n[i])
                 mo_occ_n = self.mf_nuc[i].get_occ(mo_energy_n, mo_coeff_n)
@@ -421,4 +421,4 @@ class HF(scf.hf.SCF):
 
 
 
-        
+

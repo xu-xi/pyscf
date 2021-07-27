@@ -4,7 +4,6 @@
 Analytical nuclear gradient for constrained nuclear-electronic orbital
 '''
 import numpy
-from pyscf import gto
 from pyscf import scf
 from pyscf import grad
 from pyscf import lib
@@ -52,7 +51,7 @@ class Gradients(lib.StreamObject):
         h += mol.intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(i)
         return h
 
-    def hcore_deriv(self, atm_id, mol): 
+    def hcore_deriv(self, atm_id, mol):
         'The change of Coulomb interactions between quantum and classical nuclei due to the change of the coordinates of classical nuclei'
         i = mol.atom_index
         with mol.with_rinv_as_nucleus(atm_id):
@@ -66,16 +65,19 @@ class Gradients(lib.StreamObject):
         jcross = 0
         for i in range(len(self.mol.nuc)):
             index = self.mol.nuc[i].atom_index
-            jcross -= scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(index)
+            jcross -= scf.jk.get_jk((self.mol.elec, self.mol.elec, self.mol.nuc[i], self.mol.nuc[i]), self.scf.dm_nuc[i],
+                                    scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(index)
         return jcross
 
     def grad_jcross_nuc_elec(self, mol):
         'get the gradient for the cross term of Coulomb interactions between quantum nucleus and electrons'
         i = mol.atom_index
         if self.scf.unrestricted == True:
-            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
+            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec),
+                                    self.scf.dm_elec[0] + self.scf.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
         else:
-            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
+            jcross = -scf.jk.get_jk((mol, mol, self.mol.elec, self.mol.elec), self.scf.dm_elec,
+                                    scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)
 
         return jcross
 
@@ -86,7 +88,8 @@ class Gradients(lib.StreamObject):
         for j in range(len(self.mol.nuc)):
             k = self.mol.nuc[j].atom_index
             if k != i:
-                jcross -= scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)*self.mol.atom_charge(k)
+                jcross -= scf.jk.get_jk((mol, mol, self.mol.nuc[j], self.mol.nuc[j]), self.scf.dm_nuc[j], scripts='ijkl,lk->ij',
+                                        intor='int2e_ip1', comp=3, aosym='s2kl')*self.mol.atom_charge(i)*self.mol.atom_charge(k)
         return jcross
 
     def get_ovlp(self, mol):
@@ -113,7 +116,8 @@ class Gradients(lib.StreamObject):
             jcross_elec_nuc = self.grad_jcross_elec_nuc()
             # *2 for c.c.
             if self.scf.unrestricted == True:
-                self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[0][p0:p1] + self.scf.dm_elec[1][p0:p1])*2
+                self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1],
+                                           self.scf.dm_elec[0][p0:p1] + self.scf.dm_elec[1][p0:p1])*2
             else:
                 self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1], self.scf.dm_elec[p0:p1])*2
 
@@ -121,7 +125,8 @@ class Gradients(lib.StreamObject):
                 for i in range(len(self.mol.nuc)):
                     if self.mol.nuc[i].atom_index == ia:
                         self.de[k] += numpy.einsum('xij,ij->x', self.get_hcore(self.mol.nuc[i]), self.scf.dm_nuc[i])*2
-                        self.de[k] -= numpy.einsum('xij,ij->x', self.get_ovlp(self.mol.nuc[i]), self.make_rdm1e(self.scf.mf_nuc[i]))*2
+                        self.de[k] -= numpy.einsum('xij,ij->x', self.get_ovlp(self.mol.nuc[i]),
+                                                   self.make_rdm1e(self.scf.mf_nuc[i]))*2
                         self.de[k] -= self.scf.f[ia]
                         f_deriv = numpy.einsum('ijk,jk->i', -self.mol.nuc[i].intor('int1e_irp'), self.scf.dm_nuc[i])*2
                         self.de[k] += numpy.dot(f_deriv.reshape(3,3), self.scf.f[ia])
@@ -138,7 +143,7 @@ class Gradients(lib.StreamObject):
         self.de = grad_elec + self.de
         self._finalize()
         return self.de
-    
+
     def _finalize(self):
         if self.verbose >= logger.NOTE:
             logger.note(self, '--------------- %s gradients ---------------',
@@ -155,6 +160,7 @@ class Gradients(lib.StreamObject):
         class SCF_GradScanner(self.__class__, lib.GradScanner):
             def __init__(self, g):
                 lib.GradScanner.__init__(self, g)
+
             def __call__(self, mol_or_geom, **kwargs):
                 if isinstance(mol_or_geom, Mole):
                     mol = mol_or_geom

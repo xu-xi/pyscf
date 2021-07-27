@@ -31,7 +31,7 @@ class Mole(gto.mole.Mole):
     def elec_mole(self):
         'return a Mole object for NEO-electron and classical nuclei'
 
-        elec = gto.mole.copy(self) 
+        elec = gto.mole.copy(self)
         quantum_nuclear_charge = 0
         for i in range(self.natm):
             if self.quantum_nuc[i] is True:
@@ -83,7 +83,7 @@ class Mole(gto.mole.Mole):
             basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
 
         #logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
-        
+
         nuc._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
         nuc._atm, nuc._bas, nuc._env = gto.mole.make_env(nuc._atom, nuc._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0
@@ -93,7 +93,7 @@ class Mole(gto.mole.Mole):
                 nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
 
         nuc.charge += quantum_nuclear_charge
-        nuc.spin = 0 
+        nuc.spin = 0
         nuc.nelectron = 2 # avoid UHF
 
         return nuc
