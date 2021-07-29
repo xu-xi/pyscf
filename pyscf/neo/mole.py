@@ -54,7 +54,7 @@ class Mole(gto.mole.Mole):
         # even-tempered basis
         alpha = 2*math.sqrt(2)*self.mass[atom_index]
 
-        if self.atom_symbol(atom_index) == 'H':
+        if self.atom_pure_symbol(atom_index) == 'H':
             #beta = math.sqrt(2)
             #n = 8
             basis = gto.basis.parse('''
