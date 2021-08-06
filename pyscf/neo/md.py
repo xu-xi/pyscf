@@ -5,7 +5,9 @@ calculate power spectrum and IR spectrum based on MD trajectory
 import math
 import scipy
 import numpy
+from scipy import signal
 from ase.io.trajectory import Trajectory
+from ase import units
 
 def step_average(data):
     'get cumulative averaged data'
@@ -13,9 +15,7 @@ def step_average(data):
 
 def calc_ACF(traj):
     'calculate auto-correlation functions'
-    autocorr = scipy.signal.fftconvolve(traj, traj[::-1], mode='full')[len(traj)-1:] #/ ynorm
-    #traj_fft = numpy.fft.fft(traj)
-    #autocorr = numpy.real(scipy.fft.ifft(traj_fft * numpy.conj(traj_fft))) /traj_fft.size
+    autocorr = signal.fftconvolve(traj, traj[::-1], mode='full')[len(traj)-1:] / len(traj)
     return autocorr
 
 def hann2(length):
@@ -43,7 +43,7 @@ def vacf(datafile, start=1, end=-1, step=1):
 
     return acf
 
-def dacf(datafile, timestep, start=1, end=-1, step=1):
+def dacf(datafile, time_step=0.5, start=1, end=-1, step=1):
     'calculate dipole auto-correlation function (DACF) from trajectory of MD simulations'
     traj = Trajectory(datafile)
 
@@ -57,35 +57,37 @@ def dacf(datafile, timestep, start=1, end=-1, step=1):
     acf = 0
 
     for j in range(x):
-        de = numpy.gradient(dipole[start:end:step, j], timestep)
+        de = numpy.gradient(dipole[start:end:step, j], time_step)
         acf += calc_ACF(de)
 
     return acf
 
-def calc_FFT(sig):
+def calc_FFT(acf):
     'get Fourier transform of ACF'
 
     # zero padding
-    N = int(2 ** math.ceil(math.log(len(sig), 2)))
+    N = int(2 ** math.ceil(math.log(len(acf), 2)))
 
     # data mirroring
-    #sig = numpy.concatenate((sig, sig[1::-1]), axis=0)
+    #acf = numpy.concatenate((acf, acf[1::-1]), axis=0)
 
-    yfft = numpy.fft.fft(sig, N, axis=0) / len(sig)
+    yfft = numpy.fft.fft(acf, N, axis=0)
     # return numpy.square(numpy.absolute(yfft))
     return yfft
 
-def spectrum(acf, corr_depth=4096):
+def spectrum(acf, time_step=0.5, corr_depth=4096):
     'get wavenumber and intensity of spectrum'
-    c = 2.9979245899e10 # speed of light in vacuum in [cm/s], from Wikipedia.
 
     acf = acf[:corr_depth]
     acf *= hann2(len(acf))
-    #acf = acf*scipy.signal.windows.hann(len(acf), sym=False)
     yfft = calc_FFT(acf)
 
-    wavenumber = numpy.fft.fftfreq(len(yfft), 0.5*1e-15*c)[0:int(len(yfft)/2)]
+    fs2cm = 1e-15 * units._c * 100
+
+    wavenumber = numpy.fft.fftfreq(len(yfft), time_step * fs2cm)[0:int(len(yfft)/2)]
     intensity = yfft[0:int(len(yfft)/2)]
-    temperature = scipy.integrate.cumtrapz(intensity, wavenumber) # TODO: change units
-    return wavenumber, intensity 
+    factor = 11604.52500617 * units.fs * fs2cm # eV2K * au2cm -> K*cm
+    intensity *= factor
+    temperature = scipy.integrate.cumtrapz(intensity, wavenumber)
+    return wavenumber, intensity, temperature 
 
