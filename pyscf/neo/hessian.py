@@ -443,7 +443,8 @@ class Hessian(lib.StreamObject):
 
     def harmonic_analysis(self, mol, hess, exclude_trans=True, exclude_rot=True,
                           imaginary_freq=True):
-        '''Each column is one mode
+        '''Copy from pyscf/pyscf/hessian/thermo.py
+        Each column is one mode
 
         imaginary_freq (boolean): save imaginary_freq as complex number (if True)
         or negative real number (if False)
