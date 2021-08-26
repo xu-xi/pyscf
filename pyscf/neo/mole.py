@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import os
 import math
 from pyscf import gto
 from pyscf.lib import logger
@@ -28,18 +29,6 @@ class Mole(gto.mole.Mole):
         self.elec = None # a Mole object for NEO-electron and classical nuclei
         self.nuc = [] # a list of Mole objects for quantum nuclei
 
-    def elec_mole(self):
-        'return a Mole object for NEO-electron and classical nuclei'
-
-        elec = gto.mole.copy(self)
-        quantum_nuclear_charge = 0
-        for i in range(self.natm):
-            if self.quantum_nuc[i] is True:
-                quantum_nuclear_charge -= elec._atm[i,0]
-                elec._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
-        elec.charge += quantum_nuclear_charge # charge determines the number of electrons
-        return elec
-
     def nuc_mole(self, atom_index):
         '''
         Return a Mole object for specified quantum nuclei. Default basis is even-tempered Gaussian basis.
@@ -48,70 +37,29 @@ class Mole(gto.mole.Mole):
         other heavy atom: 12s12p12d alpha=2*sqrt(2)*mass beta=sqrt(3)
         '''
 
-        nuc = gto.mole.copy(self) # a Mole object for quantum nuclei
+        nuc = gto.Mole() # a Mole object for quantum nuclei
         nuc.atom_index = atom_index
 
-        # even-tempered basis
-        alpha = 2*math.sqrt(2)*self.mass[atom_index]
-
+        dirnow = os.path.realpath(os.path.join(__file__, '..'))
         if self.atom_symbol(atom_index) == 'H@2':
-            basis = gto.basis.parse('''
-                    H   S
-                    2.767   1.000
-                    H   S
-                    12.350   1.000
-                    H   S
-                    22.638  1.000
-                    H   S
-                    45.244  1.000
-                    H   P
-                    13.345   1.000
-                    H   P
-                    19.506  1.000
-                    H   P
-                    33.976  1.000
-                    H   D
-                    14.881   1.000
-                    H   D
-                    26.889  1.000
-                    ''')
+            basis = open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read()
         elif self.atom_pure_symbol(atom_index) == 'H':
-            basis = gto.basis.parse('''
-                    H   S
-                    1.957   1.000
-                    H   S
-                    8.734   1.000
-                    H   S
-                    16.010  1.000
-                    H   S
-                    31.997  1.000
-                    H   P
-                    9.438   1.000
-                    H   P
-                    13.795  1.000
-                    H   P
-                    24.028  1.000
-                    H   D
-                    10.524   1.000
-                    H   D
-                    19.016  1.000
-                    ''')
+            basis = open(os.path.join(dirnow, 'basis/pb4d.dat')).read()
         else:
+            # even-tempered basis
+            alpha = 2*math.sqrt(2)*self.mass[atom_index]
             beta = math.sqrt(3)
             n = 12
             basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
             #logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
+        nuc.build(atom = self.atom, basis={self.atom_symbol(atom_index): basis}, cart = self.cart)
 
-        nuc._basis = gto.mole.format_basis({self.atom_symbol(atom_index): basis})
-        nuc._atm, nuc._bas, nuc._env = gto.mole.make_env(nuc._atom, nuc._basis, self._env[:gto.PTR_ENV_START])
         quantum_nuclear_charge = 0
-        for i in range(len(self.quantum_nuc)):
+        for i in range(self.natm):
             if self.quantum_nuc[i] is True:
                 quantum_nuclear_charge -= nuc._atm[i,0]
                 nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
-
         nuc.charge += quantum_nuclear_charge
-        nuc.spin = 0
         nuc.nelectron = 2 # avoid UHF
 
         return nuc
@@ -143,8 +91,17 @@ class Mole(gto.mole.Mole):
             elif self.atom_pure_symbol(i) == 'H': # Proton (from Wikipedia)
                 self.mass[i] = 1.007276466621
 
-        self.elec = self.elec_mole()
-        self.nuc = []
+        # build the Mole object for electrons and classical nuclei
+        self.elec = gto.Mole()
+        self.elec.build(**kwargs)
+        quantum_nuclear_charge = 0
+        for i in range(self.natm):
+            if self.quantum_nuc[i] is True:
+                quantum_nuclear_charge -= self.elec._atm[i,0]
+                self.elec._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
+        self.elec.charge += quantum_nuclear_charge # charge determines the number of electrons
+
+        # build a list of Mole objects for quantum nuclei
         for i in range(len(self.quantum_nuc)):
             if self.quantum_nuc[i] == True:
                 self.nuc.append(self.nuc_mole(i))
