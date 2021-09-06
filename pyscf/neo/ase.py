@@ -28,16 +28,17 @@ class Pyscf_NEO(Calculator):
         mol = neo.Mole()
         atoms = self.atoms.get_chemical_symbols()
         positions = self.atoms.get_positions()
-        mol.atom = []
+        atom_pyscf = []
         for i in range(len(atoms)):
             if atoms[i] == 'Mu':
-                mol.atom.append(['H@0', tuple(positions[i])])
+                atom_pyscf.append(['H@0', tuple(positions[i])])
             elif atoms[i] == 'D':
-                mol.atom.append(['H@2', tuple(positions[i])])
+                atom_pyscf.append(['H@2', tuple(positions[i])])
             else:
-                mol.atom.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
-        mol.basis = self.parameters.basis
+                atom_pyscf.append(['%s%i' %(atoms[i],i), tuple(positions[i])])
         mol.build(quantum_nuc = self.parameters.quantum_nuc,
+                  atom = atom_pyscf,
+                  basis = self.parameters.basis,
                   charge = self.parameters.charge, spin = self.parameters.spin)
         if self.parameters.spin == 0:
             mf = neo.CDFT(mol)
@@ -77,14 +78,14 @@ class Pyscf_DFT(Calculator):
         mol = gto.Mole()
         atoms = self.atoms.get_chemical_symbols()
         positions = self.atoms.get_positions()
-        mol.atom = []
+        atom_pyscf = []
         for i in range(len(atoms)):
             if atoms[i] == 'D':
-                mol.atom.append(['H@2', tuple(positions[i])])
+                atom_pyscf.append(['H@2', tuple(positions[i])])
             else:
-                mol.atom.append(['%s' %(atoms[i]), tuple(positions[i])])
-        mol.basis = self.parameters.basis
-        mol.build(charge = self.parameters.charge, spin = self.parameters.spin)
+                atom_pyscf.append(['%s' %(atoms[i]), tuple(positions[i])])
+        mol.build(atom = atom_pyscf, basis = self.parameters.basis,
+                  charge = self.parameters.charge, spin = self.parameters.spin)
         if self.parameters.spin != 0:
             mf = dft.UKS(mol)
         else:
@@ -94,6 +95,3 @@ class Pyscf_DFT(Calculator):
         g = mf.Gradients()
         self.results['forces'] = -g.grad()*Hartree/Bohr
         self.results['dipole'] = dip_moment(mol, mf.make_rdm1())
-
-
-

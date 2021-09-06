@@ -52,7 +52,8 @@ class Mole(gto.mole.Mole):
             n = 12
             basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
             #logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
-        nuc.build(atom = self.atom, basis={self.atom_symbol(atom_index): basis}, cart = self.cart)
+        nuc.build(atom = self.atom, basis={self.atom_symbol(atom_index): basis},
+                    charge = self.charge, cart = self.cart)
 
         quantum_nuclear_charge = 0
         for i in range(self.natm):
