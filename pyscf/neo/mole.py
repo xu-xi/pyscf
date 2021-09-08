@@ -42,9 +42,9 @@ class Mole(gto.mole.Mole):
 
         dirnow = os.path.realpath(os.path.join(__file__, '..'))
         if self.atom_symbol(atom_index) == 'H@2':
-            basis = open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read()
+            basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read())
         elif self.atom_pure_symbol(atom_index) == 'H':
-            basis = open(os.path.join(dirnow, 'basis/pb4d.dat')).read()
+            basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/pb4d.dat')).read())
         else:
             # even-tempered basis
             alpha = 2*math.sqrt(2)*self.mass[atom_index]
