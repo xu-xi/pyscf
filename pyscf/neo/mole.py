@@ -31,10 +31,13 @@ class Mole(gto.mole.Mole):
 
     def nuc_mole(self, atom_index):
         '''
-        Return a Mole object for specified quantum nuclei. Default basis is even-tempered Gaussian basis.
+        Return a Mole object for specified quantum nuclei.
 
-        H: 8s8p8d alpha=2*sqrt(2) beta=sqrt(2)
-        other heavy atom: 12s12p12d alpha=2*sqrt(2)*mass beta=sqrt(3)
+        Nuclear basis:
+
+        H: PB4-D  J. Chem. Phys. 152, 244123 (2020)
+        D: scaled PB4-D
+        other atoms: 12s12p12d, alpha=2*sqrt(2)*mass, beta=sqrt(3)
         '''
 
         nuc = gto.Mole() # a Mole object for quantum nuclei
@@ -45,9 +48,13 @@ class Mole(gto.mole.Mole):
             basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read())
         elif self.atom_pure_symbol(atom_index) == 'H':
             basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/pb4d.dat')).read())
+            #alpha = 2 * math.sqrt(2) * self.mass[atom_index]
+            #beta = math.sqrt(2)
+            #n = 8
+            #basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
         else:
             # even-tempered basis
-            alpha = 2*math.sqrt(2)*self.mass[atom_index]
+            alpha = 2 * math.sqrt(2) * self.mass[atom_index]
             beta = math.sqrt(3)
             n = 12
             basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])

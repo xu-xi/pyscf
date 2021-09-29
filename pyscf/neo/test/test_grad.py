@@ -4,19 +4,26 @@ import numpy
 import unittest
 from pyscf import neo
 
-mol = neo.Mole()
-mol.build(atom='''H 0 0 0; C 0 0 1.064; N 0 0 2.220''', basis='ccpvdz', quantum_nuc=[0])
+
 
 class KnownValues(unittest.TestCase):
     def test_grad_cdft(self):
+        mol = neo.Mole()
+        mol.build(atom='''H 0 0 0; F 0 0 0.94''', basis='ccpvdz', quantum_nuc=[0])
         mf = neo.CDFT(mol)
         mf.scf()
-        grad = [[0.0000000000, 0.0000000000, 0.0249735118],
-            [0.0000000000, 0.0000000000, -0.0197857809],
-            [0.0000000000, 0.0000000000, -0.0051923531]]
         g = neo.Gradients(mf)
-        self.assertTrue(numpy.allclose(g.kernel(), grad))
+        grad = g.kernel()
+        self.assertAlmostEqual(grad[0,-1], 0.0051324194, 6)
 
+    def test_grad_cdft2(self):
+        mol = neo.Mole()
+        mol.build(atom='''H 0 0 0; F 0 0 0.94''', basis='ccpvdz', quantum_nuc=[0,1])
+        mf = neo.CDFT(mol)
+        mf.scf()
+        g = neo.Gradients(mf)
+        grad = g.kernel()
+        self.assertAlmostEqual(grad[0,-1], 0.0043045068, 6)
 
 
 if __name__ == "__main__":

@@ -11,17 +11,17 @@ class KnownValues(unittest.TestCase):
     def test_scf_noepc(self):
         mf = neo.CDFT(mol, epc=None)
         self.assertAlmostEqual(mf.scf(), -93.3384022881535, 8)
-        self.assertTrue(numpy.allclose(mf.f[0], (-3.04933465e-16, -6.40788894e-17, -4.03031884e-02)))
+        self.assertAlmostEqual(mf.f[0][-1], -4.03031884e-02, 5)
 
     def test_scf_epc17_1(self):
         mf = neo.CDFT(mol, epc='17-1')
         pass
-        #self.assertAlmostEqual(mf.scf(), , 9) 
+        #self.assertAlmostEqual(mf.scf(), , 9)
 
     def test_scf_epc17_2(self):
         mf = neo.CDFT(mol, epc='17-2')
         pass
-        #self.assertAlmostEqual(mf.scf(), , 9) 
+        #self.assertAlmostEqual(mf.scf(), , 9)
 
 
 if __name__ == "__main__":
