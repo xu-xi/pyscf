@@ -215,7 +215,7 @@ class KnownValues(unittest.TestCase):
         npt.assert_array_almost_equal(rmp2_noons, noons, decimal=5)
         mymc.kernel(natorbs)
 
-        # The tests below are only to ensure that `make_natural_orbitals` can 
+        # The tests below are only to ensure that `make_natural_orbitals` can
         # run at all since we've confirmed above that the NOONs are correct.
         # Test CISD
         mycisd = ci.CISD(myhf).run()
@@ -236,6 +236,11 @@ class KnownValues(unittest.TestCase):
         ncas, nelecas = (8, 12)
         mymc = mcscf.CASCI(myhf, ncas, nelecas)
 
+        # Test UHF
+        # The tests below are only to ensure that `make_natural_orbitals` can
+        # run at all since we've confirmed above that the NOONs are correct for MP2
+        mcscf.addons.make_natural_orbitals(myhf)
+
         # Test MP2
         # Trusted results from ORCA v4.2.1
         rmp2_noons = [1.99992786,1.99992701,1.99414062,1.98906552,1.96095173,1.96095165,1.95280755,1.02078458,1.02078457,0.04719006,0.01274288,0.01274278,0.00728679,0.00582683,0.00543964,0.00543962,0.00290772,0.00108258]
@@ -244,7 +249,7 @@ class KnownValues(unittest.TestCase):
         npt.assert_array_almost_equal(rmp2_noons, noons)
         mymc.kernel(natorbs)
 
-        # The tests below are only to ensure that `make_natural_orbitals` can 
+        # The tests below are only to ensure that `make_natural_orbitals` can
         # run at all since we've confirmed above that the NOONs are correct.
         # Test CISD
         mycisd = ci.CISD(myhf).run()
@@ -399,8 +404,8 @@ class KnownValues(unittest.TestCase):
         self.assertEqual(numpy.count_nonzero(numpy.linalg.eigh(s1)[0]>1e-10),
                          s1.shape[0])
         self.assertAlmostEqual(numpy.linalg.norm(s1), 6.782329983125268, 9)
-        
-    def test_project_init_guess_uhf (self): 
+
+    def test_project_init_guess_uhf (self):
         mo1_u = mcscf.addons.project_init_guess (mcu_prg, mfu.mo_coeff)
         for mo1 in mo1_u:
             s1 = reduce(numpy.dot, (mo1.T, mfu_prg.get_ovlp(), mo1))
@@ -491,4 +496,3 @@ class KnownValues(unittest.TestCase):
 if __name__ == "__main__":
     print("Full Tests for mcscf.addons")
     unittest.main()
-
