@@ -23,7 +23,7 @@ def init_guess_mixed(mol, mixing_parameter = numpy.pi/4):
     psi_2a = -numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
     psi_2b =  numpy.sin(q)*psi_homo + numpy.cos(q)*psi_lumo
 
-    Returns: 
+    Returns:
         Density matrices, a list of 2D ndarrays for alpha and beta spins
     '''
     # opt: q, mixing parameter 0 < q < 2 pi
@@ -94,7 +94,8 @@ class HF(scf.hf.SCF):
         # set up the Hamiltonian for electrons
         if self.unrestricted == True:
             self.mf_elec = scf.UHF(self.mol.elec)
-            self.dm_elec = init_guess_mixed(self.mol.elec)
+            #self.dm_elec = init_guess_mixed(self.mol.elec)
+            self.dm_elec = self.mf_elec.get_init_guess(key='1e')
         else:
             self.mf_elec = scf.RHF(self.mol.elec)
             self.dm_elec = self.mf_elec.get_init_guess(key='1e')
@@ -127,19 +128,19 @@ class HF(scf.hf.SCF):
         # Coulomb interactions between quantum nucleus and electrons
         if self.unrestricted == True:
             h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
-                               self.dm_elec[0], scripts='ijkl,lk->ij', aosym ='s4') * charge
+                               self.dm_elec[0], scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
             h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
-                               self.dm_elec[1], scripts='ijkl,lk->ij', aosym ='s4') * charge
+                               self.dm_elec[1], scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
         else:
             h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
-                               self.dm_elec, scripts='ijkl,lk->ij', aosym ='s4') * charge
+                               self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
             ja = self.mol.nuc[j].atom_index
             if ja != ia and isinstance(self.dm_nuc[j], numpy.ndarray):
                 h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]),
-                                   self.dm_nuc[j], scripts='ijkl,lk->ij')*charge*self.mol.atom_charge(ja)
+                                   self.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e')*charge*self.mol.atom_charge(ja)
 
         return h
 
@@ -155,7 +156,7 @@ class HF(scf.hf.SCF):
         return get_occ
 
     def get_init_guess_nuc(self, mf_nuc, key='1e'):
-        '''Generate initial guess density matrix for quantum nuclei 
+        '''Generate initial guess density matrix for quantum nuclei
 
            Returns:
             Density matrix, 2D ndarray
@@ -238,7 +239,7 @@ class HF(scf.hf.SCF):
                 if j != i:
                     ja = mol.nuc[j].atom_index
                     jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
-                                           dm_nuc[j], scripts='ijkl,lk->ij', aosym='s4') \
+                                           dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') \
                             * mol.atom_charge(ia) * mol.atom_charge(ja)
                     E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
 
@@ -290,7 +291,7 @@ class HF(scf.hf.SCF):
         return E_tot
 
     def scf(self, conv_tol = 1e-9, max_cycle = 60):
-        '''self-consistent field driver for NEO 
+        '''self-consistent field driver for NEO
         electrons and quantum nuclei are self-consistent in turn
         '''
 
@@ -411,14 +412,3 @@ class HF(scf.hf.SCF):
                 logger.note(self, 'converged NEO energy = %.15g', E_tot)
                 logger.timer(self, 'scf_cycle', *cput0)
                 return E_tot
-
-
-
-
-
-
-
-
-
-
-

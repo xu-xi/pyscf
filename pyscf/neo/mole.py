@@ -47,7 +47,7 @@ class Mole(gto.mole.Mole):
         if self.atom_symbol(atom_index) == 'H@2':
             basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read())
         elif self.atom_pure_symbol(atom_index) == 'H':
-            basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/pb4d.dat')).read())
+            basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/pb5f.dat')).read())
             #alpha = 2 * math.sqrt(2) * self.mass[atom_index]
             #beta = math.sqrt(2)
             #n = 8
@@ -60,7 +60,7 @@ class Mole(gto.mole.Mole):
             basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta)])
             #logger.info(self, 'Nuclear basis for %s: n %s alpha %s beta %s' %(self.atom_symbol(atom_index), n, alpha, beta))
         nuc.build(atom = self.atom, basis={self.atom_symbol(atom_index): basis},
-                    charge = self.charge, cart = self.cart)
+                    charge = self.charge, cart = self.cart, spin = self.spin)
 
         quantum_nuclear_charge = 0
         for i in range(self.natm):
@@ -68,17 +68,20 @@ class Mole(gto.mole.Mole):
                 quantum_nuclear_charge -= nuc._atm[i,0]
                 nuc._atm[i,0] = 0 # set the nuclear charge of quantum nuclei to be 0
         nuc.charge += quantum_nuclear_charge
-        nuc.nelectron = 2 # avoid UHF
+
+        # avoid UHF
+        nuc.spin = 0
+        nuc.nelectron = 2
 
         return nuc
 
     def build(self, quantum_nuc = 'all', nuc_basis = 'etbs', **kwargs):
         'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
-        gto.mole.Mole.build(self, **kwargs)
+        super().build(self, **kwargs)
 
         self.quantum_nuc = [False]*self.natm
 
-        if quantum_nuc is 'all':
+        if quantum_nuc == 'all':
             self.quantum_nuc = [True]*self.natm
             logger.info(self, 'All atoms are treated quantum-mechanically by default.')
         elif isinstance(quantum_nuc, list):
