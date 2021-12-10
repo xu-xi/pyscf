@@ -135,7 +135,7 @@ class HF(scf.hf.SCF):
         else:
             if self.with_df == False:
                 h -= scf.jk.get_jk((mole, mole, self.mol.elec, self.mol.elec),
-                                self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
+                                   self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
             else:
                 i = self.mol.nuc.index(mole)
                 h -= numpy.einsum('ijkl,ji->kl', self.df_eri[i], self.dm_elec) * charge
@@ -196,7 +196,7 @@ class HF(scf.hf.SCF):
             if isinstance(self.dm_nuc[i], numpy.ndarray):
                 if self.with_df == False:
                     j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]),
-                        self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
+                                       self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
                 else:
                     j -= numpy.einsum('ijkl,lk->ij', self.df_eri[i], self.dm_nuc[i]) * charge
 
@@ -221,7 +221,7 @@ class HF(scf.hf.SCF):
 
     def elec_nuc_coulomb(self, dm_elec, dm_nuc):
         'the energy of Coulomb interactions between electrons and quantum nuclei'
-        #TODO: avoid calculating the integral repeatedly
+        # TODO: avoid calculating the integral repeatedly
         mol = self.mol
         jcross = 0
         for i in range(len(dm_nuc)):
@@ -244,18 +244,17 @@ class HF(scf.hf.SCF):
         'the energy of Coulomb interactions between quantum nuclei'
         mol = self.mol
         E = 0
-        for i in range(len(dm_nuc)):
+        for i in range(len(dm_nuc)-1):
             ia = mol.nuc[i].atom_index
-            for j in range(len(dm_nuc)):
-                if j != i:
-                    ja = mol.nuc[j].atom_index
-                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
-                                           dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') \
-                            * mol.atom_charge(ia) * mol.atom_charge(ja)
-                    E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
+            for j in range(i+1, len(dm_nuc)):
+                ja = mol.nuc[j].atom_index
+                jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
+                                        dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') \
+                        * mol.atom_charge(ia) * mol.atom_charge(ja)
+                E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
 
-        logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E*.5) # double counted
-        return E*.5
+        logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E)
+        return E
 
     def energy_qmnuc(self, mf_nuc, h1n, dm_nuc):
         'the energy of quantum nucleus'
