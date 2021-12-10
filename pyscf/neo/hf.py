@@ -6,11 +6,8 @@ Nuclear Electronic Orbital Hartree-Fock (NEO-HF)
 
 import numpy
 import scipy
-import copy
-from pyscf import gto
 from pyscf import scf
 from pyscf import neo
-from pyscf import df
 from pyscf.lib import logger
 from pyscf.data import nist
 
@@ -230,9 +227,11 @@ class HF(scf.hf.SCF):
         for i in range(len(dm_nuc)):
             ia = mol.nuc[i].atom_index
             charge = mol.atom_charge(ia)
-
-            jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]),
-                                    dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
+            if self.with_df == False:
+                jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]),
+                                        dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
+            else:
+                jcross -= numpy.einsum('ijkl,lk->ij', self.df_eri[i], self.dm_nuc[i])
 
         if self.unrestricted == True:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
@@ -302,45 +301,6 @@ class HF(scf.hf.SCF):
 
         return E_tot
 
-    def get_eri_ne_df(self):
-        ''' get Coulomb integral between quantum nuclei and electrons from density fitting '''
-
-        df_eri = [None] * self.mol.nuc_num
-
-        for i in range(self.mol.nuc_num):
-            mole = self.mol.nuc[i]
-            ia = mole.atom_index
-
-            # set up the auxiliary basis
-            alpha = 4* numpy.sqrt(2) * self.mol.mass[ia]
-            beta = numpy.sqrt(2)
-            n = 32
-            basis = gto.expand_etbs([(0, n, alpha, beta), (1, n, alpha, beta), (2, n, alpha, beta), (3, n, alpha, beta)])
-
-            # build auxmol
-            auxmol = copy.copy(mole)
-            auxmol.build(atom = mole.atom, basis={mole.atom_symbol(ia): basis},
-                charge = mole.charge, cart = mole.cart, spin = mole.spin)
-
-            # calculate 3c2e and 2c2e
-            ints_3c2e_nuc = df.incore.aux_e2(mole, auxmol, intor='int3c2e')
-            ints_3c2e_elec = df.incore.aux_e2(self.mol.elec, auxmol, intor='int3c2e')
-            ints_2c2e = auxmol.intor('int2c2e')
-            #w, _ = numpy.linalg.eig(ints_2c2e)
-            #print(w)
-
-            nao_e = self.mol.elec.nao
-            nao_n = mole.nao
-            naux = auxmol.nao
-
-            # Compute the DF coefficients (df_coef) and the DF 2-electron (df_eri)
-            df_coef = scipy.linalg.solve(ints_2c2e, ints_3c2e_nuc.reshape(nao_n*nao_n, naux).T)
-            df_coef = df_coef.reshape(naux, nao_n, nao_n)
-
-            df_eri[i] = numpy.einsum('ijP,Pkl->ijkl', ints_3c2e_elec, df_coef)
-
-        return df_eri
-
     def scf(self, conv_tol = 1e-9, max_cycle = 60):
         '''self-consistent field driver for NEO
         electrons and quantum nuclei are self-consistent in turn
@@ -350,7 +310,8 @@ class HF(scf.hf.SCF):
 
         # density fitting
         if self.with_df == True:
-            self.df_eri = self.get_eri_ne_df()
+            from pyscf.neo.df import get_eri_ne_df
+            self.df_eri = get_eri_ne_df(self)
 
         E_tot = self.energy_tot(self.dm_elec, self.dm_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
@@ -397,7 +358,8 @@ class HF(scf.hf.SCF):
         cput0 = (logger.process_clock(), logger.perf_counter())
 
         if self.with_df == True:
-            self.df_eri = self.get_eri_ne_df()
+            from pyscf.neo.df import get_eri_ne_df
+            self.df_eri = get_eri_ne_df(self)
 
         E_tot = self.energy_tot(self.dm_elec, self.dm_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
