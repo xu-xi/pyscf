@@ -138,14 +138,20 @@ class HF(scf.hf.SCF):
                                    self.dm_elec, scripts='ijkl,lk->ij', intor='int2e', aosym ='s4') * charge
             else:
                 i = self.mol.nuc.index(mole)
-                h -= numpy.einsum('ijkl,ji->kl', self.df_eri[i], self.dm_elec) * charge
+                rho = numpy.einsum('ijP,ji->P', self.ints_ne[i], self.dm_elec)
+                h -= numpy.einsum('P,Pkl->kl', rho, self.df_coef[i]) * charge
 
         # Coulomb interactions between quantum nuclei
         for j in range(len(self.dm_nuc)):
             ja = self.mol.nuc[j].atom_index
             if ja != ia and isinstance(self.dm_nuc[j], numpy.ndarray):
-                h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]),
-                                   self.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e')*charge*self.mol.atom_charge(ja)
+                if self.with_df == False:
+                    h += scf.jk.get_jk((mole, mole, self.mol.nuc[j], self.mol.nuc[j]),
+                                       self.dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e')*charge*self.mol.atom_charge(ja)
+                else:
+                    rho = numpy.einsum('Qkl,lk->Q', self.df_coef[j], self.dm_nuc[j])
+                    _temp = numpy.einsum('Pij,PQ->Qij', self.df_coef[i], self.ints_nn[i][j])
+                    h += numpy.einsum('Qij,Q->ij', _temp, rho)*charge*self.mol.atom_charge(ja)
 
         return h
 
@@ -198,7 +204,8 @@ class HF(scf.hf.SCF):
                     j -= scf.jk.get_jk((mole, mole, self.mol.nuc[i], self.mol.nuc[i]),
                                        self.dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') * charge
                 else:
-                    j -= numpy.einsum('ijkl,lk->ij', self.df_eri[i], self.dm_nuc[i]) * charge
+                    rho = numpy.einsum('Pkl,lk->P', self.df_coef[i], self.dm_nuc[i])
+                    j -= numpy.einsum('ijP,P->ij', self.ints_ne[i], rho) * charge
 
         return scf.hf.get_hcore(mole) + j
 
@@ -231,7 +238,8 @@ class HF(scf.hf.SCF):
                 jcross -= scf.jk.get_jk((mol.elec, mol.elec, mol.nuc[i], mol.nuc[i]),
                                         dm_nuc[i], scripts='ijkl,lk->ij', intor='int2e', aosym = 's4') * charge
             else:
-                jcross -= numpy.einsum('ijkl,lk->ij', self.df_eri[i], self.dm_nuc[i])
+                rho = numpy.einsum('Pkl,lk->P', self.df_coef[i], self.dm_nuc[i])
+                jcross -= numpy.einsum('ijP,P->ij', self.ints_ne[i], rho) * charge
 
         if self.unrestricted == True:
             E = numpy.einsum('ij,ji', jcross, dm_elec[0] + dm_elec[1])
@@ -248,10 +256,16 @@ class HF(scf.hf.SCF):
             ia = mol.nuc[i].atom_index
             for j in range(i+1, len(dm_nuc)):
                 ja = mol.nuc[j].atom_index
-                jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
-                                        dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') \
+                if self.with_df == False:
+                    jcross = scf.jk.get_jk((mol.nuc[i], mol.nuc[i], mol.nuc[j], mol.nuc[j]),
+                                           dm_nuc[j], scripts='ijkl,lk->ij', intor='int2e', aosym='s4') \
                         * mol.atom_charge(ia) * mol.atom_charge(ja)
-                E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
+                    E += numpy.einsum('ij,ji', jcross, dm_nuc[i])
+                else:
+                    rho1 = numpy.einsum('Pij,ji->P', self.df_coef[i], self.dm_nuc[i])
+                    rho2 = numpy.einsum('Qkl,lk->Q', self.df_coef[j], self.dm_nuc[j])
+                    E += numpy.einsum('P,Q,PQ->', rho1, rho2,
+                                      self.ints_nn[i][j])*mol.atom_charge(ia)*mol.atom_charge(ja)
 
         logger.debug(self, 'Energy of n-n Comlomb interactions: %s', E)
         return E
@@ -309,8 +323,11 @@ class HF(scf.hf.SCF):
 
         # density fitting
         if self.with_df == True:
-            from pyscf.neo.df import get_eri_ne_df
-            self.df_eri = get_eri_ne_df(self)
+            from pyscf.neo.df import get_eri_ne_df, get_eri_nn_df
+            self.df_coef, self.ints_ne = get_eri_ne_df(self)
+            self.ints_nn = [None] * self.mol.nuc_num
+            for i in range(self.mol.nuc_num):
+                self.ints_nn[i] = get_eri_nn_df(self, self.mol.nuc[i])
 
         E_tot = self.energy_tot(self.dm_elec, self.dm_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
@@ -356,9 +373,13 @@ class HF(scf.hf.SCF):
 
         cput0 = (logger.process_clock(), logger.perf_counter())
 
+        # density fitting
         if self.with_df == True:
-            from pyscf.neo.df import get_eri_ne_df
-            self.df_eri = get_eri_ne_df(self)
+            from pyscf.neo.df import get_eri_ne_df, get_eri_nn_df
+            self.df_coef, self.ints_ne = get_eri_ne_df(self)
+            self.ints_nn = [None] * self.mol.nuc_num
+            for i in range(self.mol.nuc_num):
+                self.ints_nn[i] = get_eri_nn_df(self, self.mol.nuc[i])
 
         E_tot = self.energy_tot(self.dm_elec, self.dm_nuc)
         logger.info(self, 'Initial total Energy of NEO: %.15g\n' %(E_tot))
