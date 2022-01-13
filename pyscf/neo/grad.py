@@ -111,9 +111,10 @@ class Gradients(lib.StreamObject):
         self.de = numpy.zeros((len(atmlst), 3))
         aoslices = self.mol.aoslice_by_atom()
 
+        jcross_elec_nuc = self.grad_jcross_elec_nuc()
+
         for k, ia in enumerate(atmlst):
             p0, p1 = aoslices[ia, 2:]
-            jcross_elec_nuc = self.grad_jcross_elec_nuc()
             # *2 for c.c.
             if self.scf.unrestricted == True:
                 self.de[k] -= numpy.einsum('xij,ij->x', jcross_elec_nuc[:,p0:p1],
