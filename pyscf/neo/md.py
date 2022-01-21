@@ -29,7 +29,11 @@ def vacf(datafile, start=0, end=-1, step=1):
     traj = Trajectory(datafile)
 
     v = []
-    for i in range(len(traj)):
+
+    if end == -1:
+        end = len(traj)
+
+    for i in range(start, end, step):
         v.append(traj[i].get_velocities())
     v = numpy.array(v)
 
@@ -41,7 +45,7 @@ def vacf(datafile, start=0, end=-1, step=1):
 
     for i in range(n): # i-th atom
         for j in range(x): # j-th component of verlocity
-            acf += calc_ACF(v[start:end:step,i,j]) * mass[i]
+            acf += calc_ACF(v[:,i,j]) * mass[i]
 
     return acf
 
@@ -51,8 +55,11 @@ def dacf(datafile, time_step=0.5, start=0, end=-1, step=1):
     global n # the number of atoms
     n = len(traj[-1].get_positions())
 
+    if end == -1:
+        end = len(traj)
+
     dipole = []
-    for i in range(len(traj)):
+    for i in range(start, end, step):
         dipole.append(traj[i].get_dipole_moment())
     dipole = numpy.array(dipole)
 
@@ -61,7 +68,7 @@ def dacf(datafile, time_step=0.5, start=0, end=-1, step=1):
     acf = 0
 
     for j in range(x):
-        de = numpy.gradient(dipole[start:end:step, j], time_step)
+        de = numpy.gradient(dipole[:, j], time_step)
         acf += calc_ACF(de)
 
     return acf
