@@ -56,7 +56,7 @@ class KS(HF):
         # set up Hamiltonian for each quantum nuclei
         for i in range(len(self.mol.nuc)):
             ia = self.mol.nuc[i].atom_index
-            if self.epc is not None and self.mol.atom_symbol(ia) == 'H':  # only support electron-proton correlation
+            if self.epc is not None and self.mol.atom_pure_symbol(ia) == 'H':  # only support electron-proton correlation
                 self.mf_nuc[i] = dft.RKS(self.mol.nuc[i])
                 self.mf_nuc[i].get_veff = self.get_veff_nuc_epc
                 #self.mf_nuc[i].conv_tol = 1e-8
@@ -213,8 +213,3 @@ class KS(HF):
             n1 += veff.exc
         #logger.debug(self, 'Energy of %s: %s', self.mol.atom_symbol(ia), n1)
         return n1
-
-
-
-
-
