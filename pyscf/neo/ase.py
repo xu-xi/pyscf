@@ -6,7 +6,7 @@ from ase.calculators.calculator import Calculator
 from ase.units import Bohr, Hartree
 from pyscf.data import nist
 from pyscf import neo
-from pyscf import gto, dft
+from pyscf import gto, dft, tddft
 from pyscf.scf.hf import dip_moment
 
 class Pyscf_NEO(Calculator):
@@ -45,22 +45,26 @@ class Pyscf_NEO(Calculator):
         else:
             mf = neo.CDFT(mol, unrestricted = True)
         mf.mf_elec.xc = self.parameters.xc
+
         self.results['energy'] = mf.scf()*Hartree
-        g = mf.Gradients()
-        self.results['forces'] = -g.grad()*Hartree/Bohr
 
-        dip_elec = dip_moment(mol.elec, mf.mf_elec.make_rdm1()) # dipole of electrons and classical nuclei
-        dip_nuc = 0
-        for i in range(len(mf.mf_nuc)):
-            ia = mf.mf_nuc[i].mol.atom_index
-            dip_nuc += mol.atom_charge(ia) * mf.mf_nuc[i].nuclei_expect_position * nist.AU2DEBYE
+        if 'forces' in properties:
+            g = mf.Gradients()
+            self.results['forces'] = -g.grad()*Hartree/Bohr
 
-        self.results['dipole'] = dip_elec + dip_nuc
+        if 'dipole' in properties:
+            dip_elec = dip_moment(mol.elec, mf.mf_elec.make_rdm1(), verbose=2) # dipole of electrons and classical nuclei
+            dip_nuc = 0
+            for i in range(len(mf.mf_nuc)):
+                ia = mf.mf_nuc[i].mol.atom_index
+                dip_nuc += mol.atom_charge(ia) * mf.mf_nuc[i].nuclei_expect_position * nist.AU2DEBYE
+
+            self.results['dipole'] = dip_elec + dip_nuc
 
 
 class Pyscf_DFT(Calculator):
 
-    implemented_properties = ['energy', 'forces', 'dipole']
+    implemented_properties = ['energy', 'forces', 'dipole', 'energies']
     default_parameters = {'mf':'RKS',
                           'basis': 'ccpvdz',
                           'charge': 0,
@@ -72,7 +76,7 @@ class Pyscf_DFT(Calculator):
     def __init__(self, **kwargs):
         Calculator.__init__(self, **kwargs)
 
-    def calculate(self, atoms=None, properties=['energy', 'forces', 'dipole'],
+    def calculate(self, atoms=None, properties=['energy'],
                   system_changes=['positions', 'numbers', 'cell', 'pbc', 'charges', 'magmoms']):
         Calculator.calculate(self, atoms, properties, system_changes)
         mol = gto.Mole()
@@ -91,7 +95,18 @@ class Pyscf_DFT(Calculator):
         else:
             mf = dft.RKS(mol)
         mf.xc = self.parameters.xc
+
         self.results['energy'] = mf.scf()*Hartree
-        g = mf.Gradients()
-        self.results['forces'] = -g.grad()*Hartree/Bohr
-        self.results['dipole'] = dip_moment(mol, mf.make_rdm1())
+
+        if 'forces' in properties:
+            g = mf.Gradients()
+            self.results['forces'] = -g.grad()*Hartree/Bohr
+
+        if 'dipole' in properties:
+            self.results['dipole'] = dip_moment(mol, mf.make_rdm1())
+
+        # 'energies' is for excited energies calculated by TDDFT
+        if 'energies' in properties:
+            td = tddft.TDA(mf)
+            e, xy = td.kernel()
+            self.results['energies'] = e * nist.HARTREE2EV
