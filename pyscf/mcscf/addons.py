@@ -500,7 +500,7 @@ def project_init_guess (casscf, mo_init, prev_mol=None, priority=None, use_hf_co
         # Interpret priority keyword
         nocc = ncore + ncas
         if isinstance (priority, str):
-            ridx = numpy.zeros ((2, nmo_init), dtype=numpy.bool)
+            ridx = numpy.zeros ((2, nmo_init), dtype=bool)
             ridx[0,:ncore] = ridx[1,ncore:nocc] = True
             if priority.lower () == 'active': ridx = ridx[::-1,:]
             elif not priority.lower () == 'core':
@@ -508,13 +508,13 @@ def project_init_guess (casscf, mo_init, prev_mol=None, priority=None, use_hf_co
             # Edge case: ncore == 0 or ncas == 0 -> remove zero rows from ridx
             ridx = ridx[ridx.sum (1).astype (bool)]
         else:
-            ridx = numpy.zeros ((len (priority), nmo), dtype=numpy.bool_)
+            ridx = numpy.zeros ((len (priority), nmo), dtype=bool)
             for row, idx in zip (ridx, priority):
                 try:
                     row[idx] = True
                 except IndexError:
                     raise RuntimeError ("Invalid priority keyword: index array cannot address shape (*,nmo_init)")
-            ridx_counts = ridx.astype (numpy.integer).sum (0)
+            ridx_counts = ridx.astype (int).sum (0)
             if numpy.any (ridx_counts > 1):
                 raise RuntimeError ("Invalid priority keyword: index array has repeated elements")
         incl = numpy.any (ridx, axis=0)
@@ -736,7 +736,7 @@ def _make_rdm12_on_mo(casdm1, casdm2, ncore, ncas, nmo):
 def make_rdm12(casscf, mo_coeff=None, ci=None):
     if ci is None: ci = casscf.ci
     if mo_coeff is None: mo_coeff = casscf.mo_coeff
-    assert(not _is_uhf_mo(mo_coeff))
+    assert (not _is_uhf_mo(mo_coeff))
     nelecas = casscf.nelecas
     ncas = casscf.ncas
     ncore = casscf.ncore
@@ -855,7 +855,7 @@ def state_average(casscf, weights=(0.5,0.5), wfnsym=None):
     used as intermediates for calculations of the gradient of a single root in the context
     of the SA-CASSCF method; see: Mol. Phys. 99, 103 (2001).
     '''
-    assert(abs(sum(weights)-1) < 1e-3)
+    assert (abs(sum(weights)-1) < 1e-3)
     fcibase_class = casscf.fcisolver.__class__
     has_spin_square = getattr(casscf.fcisolver, 'spin_square', None)
     if wfnsym is None:
@@ -1165,7 +1165,7 @@ def state_average_mix(casscf, fcisolvers, weights=(0.5,0.5)):
     '''
     fcibase_class = fcisolvers[0].__class__
     nroots = sum(solver.nroots for solver in fcisolvers)
-    assert(nroots == len(weights))
+    assert (nroots == len(weights))
     has_spin_square = all(getattr(solver, 'spin_square', None)
                           for solver in fcisolvers)
     has_large_ci = all(getattr(solver, 'large_ci', None)
@@ -1411,7 +1411,7 @@ def state_average_mix_(casscf, fcisolvers, weights=(0.5,0.5)):
     return casscf
 
 
-del(BASE, MAP2HF_TOL)
+del (BASE, MAP2HF_TOL)
 
 
 if __name__ == '__main__':
