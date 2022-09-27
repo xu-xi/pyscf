@@ -5,8 +5,7 @@ Coupled perturbed Hartree-Fock for constrained nuclear-electronic orbital method
 '''
 
 import numpy
-from pyscf import lib, gto, scf
-from pyscf.hessian.rks import Hessian
+from pyscf import lib, scf
 from pyscf.data import nist
 from pyscf.lib import logger
 from functools import reduce
@@ -248,8 +247,6 @@ class CPHF(lib.StreamObject):
         for a in self.atmlst:
             h1ao = numpy.zeros((3,nao,nao))
             v1ao = numpy.zeros((3,nao,nao))
-            s1ao = numpy.zeros((3,nao,nao))
-            f1ao = numpy.zeros((3,nao,nao))
 
             shl0, shl1, p0, p1 = self.mol.aoslice_by_atom()[a, :]
             shls_slice = (shl0, shl1) + (0, self.mol.elec.nbas) + (0, self.mol.nuc[i].nbas)*2
@@ -268,13 +265,6 @@ class CPHF(lib.StreamObject):
                                        self.base.dm_elec, scripts='ijkl,lk->ij', intor='int2e_ip1', comp=3, aosym='s2kl')
                 v1_ne += v1_ne.transpose(0, 2, 1)
                 v1ao -= v1_ne*self.mol.atom_charge(ia)
-
-                f1ao = numpy.einsum(
-                    'ijkl,j->ikl', -self.mol.nuc[i].intor('int1e_irp').reshape(3, 3, nao, nao), self.base.f[ia])
-                f1ao += f1ao.transpose(0, 2, 1)
-
-                s1ao = -self.mol.nuc[i].intor('int1e_ipovlp', comp=3)
-                s1ao += s1ao.transpose(0, 2, 1)
 
                 for j in range(len(self.mol.nuc)):
                     if j != i:
@@ -299,11 +289,9 @@ class CPHF(lib.StreamObject):
                         vrinv += vrinv.transpose(0, 2, 1)
                     h1ao += vrinv
 
-            s1vo = self.ao2mo(mf_n, s1ao)
-            s1.append(s1vo)
-            B = self.ao2mo(mf_n, h1ao + v1ao + f1ao) - s1vo*e_i
+            B = self.ao2mo(mf_n, h1ao + v1ao)
             Bs.append(B)
-        return numpy.array(Bs).reshape(-1, nmo, nocc), numpy.array(s1).reshape(-1, nmo, nocc)
+        return numpy.array(Bs).reshape(-1, nmo, nocc)
 
     def kernel(self, max_cycle=30, tol=1e-9, hermi=False):
         'CPHF solver for cNEO'
@@ -324,9 +312,9 @@ class CPHF(lib.StreamObject):
             e_i_n = mf_n.mo_energy[occidx_n]
             e_ai_n = -1 / lib.direct_sum('a-i->ai', e_a_n, e_i_n)
 
-            B_n, s1 = self.get_Bmat_nuc(i)
+            B_n = self.get_Bmat_nuc(i)
             B_n[:,viridx_n] *= e_ai_n
-            B_n[:,occidx_n] = -s1[:, occidx_n]*.5
+            B_n[:,occidx_n] = 0
 
             mo1base = numpy.concatenate((mo1base, B_n.ravel()))
 
@@ -340,7 +328,6 @@ class CPHF(lib.StreamObject):
                 else:
                     mo1base = numpy.concatenate((mo1base, numpy.zeros(9)))
         logger.info(self, 'The size of CPHF equations: %s', len(mo1base))
-
 
         mo1 = lib.krylov(self.full_response, mo1base, tol=tol, max_cycle=max_cycle, hermi=hermi)
         mo1_e, mo1_n, f1 = self.mo12ne(mo1)
@@ -362,7 +349,7 @@ class CPHF(lib.StreamObject):
             e_ai = -1 / lib.direct_sum('a-i->ai', e_a, e_i)
 
             v1mo_n = self.get_A_n(i, mo1_e, mo1_n, f1)
-            B_n, s1 = self.get_Bmat_nuc(i)
+            B_n = self.get_Bmat_nuc(i)
             e1 = B_n[:,occidx] + mo1_n[i][:,occidx] * lib.direct_sum('i-j->ij', e_i, e_i) - v1mo_n[:,occidx]
             logger.debug(self, 'e1n:\n%s', e1)
             e1_n.append(e1)

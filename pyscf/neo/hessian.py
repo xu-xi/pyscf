@@ -61,7 +61,6 @@ class Hessian(lib.StreamObject):
         mo_coeff_n = mf_nuc.mo_coeff
         mo_occ_n = mf_nuc.mo_occ
         mocc_n = mo_coeff_n[:, mo_occ_n>0]
-        nao_n = mo_coeff_n.shape[0]
         dm0_n = self.base.dm_nuc[i]
 
         for i0, ia in enumerate(self.atmlst):
@@ -101,8 +100,7 @@ class Hessian(lib.StreamObject):
 
     def hess_elec_nuc2(self, i):
         'part of hessian for Coulomb interactions between electrons and the i-th quantum nuclei'
-        mo_coeff_e = self.base.mf_elec.mo_coeff
-        mo_occ_e = self.base.mf_elec.mo_occ
+
         dm0_e = self.base.dm_elec
         nao_e = dm0_e.shape[0]
 
@@ -113,10 +111,7 @@ class Hessian(lib.StreamObject):
         nuc = mf_nuc.mol
         index = nuc.atom_index
         charge = self.mol.atom_charge(index)
-        mo_coeff_n = mf_nuc.mo_coeff
-        mo_occ_n = mf_nuc.mo_occ
         dm0_n = self.base.dm_nuc[i]
-        nao_n, nmo_n = mf_nuc.mo_coeff.shape
         i = self.atmlst.index(index)
 
         hess_naa = scf.jk.get_jk((nuc, nuc, self.mol.elec, self.mol.elec), dm0_e,
@@ -165,32 +160,19 @@ class Hessian(lib.StreamObject):
         'part of hessian for the i-th quantum nuclei'
         de2 = numpy.zeros((self.mol.natm, self.mol.natm, 3, 3))
         mf_nuc = self.base.mf_nuc[i]
-        dm0_n = self.base.dm_nuc[i]
         index = mf_nuc.mol.atom_index
-        mo_energy = mf_nuc.mo_energy
         mo_coeff = mf_nuc.mo_coeff
         mo_occ = mf_nuc.mo_occ
         mocc = mo_coeff[:, mo_occ>0]
-        nocc = mocc.shape[1]
         nao, nmo = mo_coeff.shape
 
         for i0, ia in enumerate(self.atmlst):
             h1a = numpy.zeros((3, nao, nao))
-            r1a = numpy.zeros((3, 3, nao, nao))
-            s1ao = numpy.zeros((3, nao, nao))
-            s1oo = numpy.zeros((3, nocc, nocc))
 
             if ia == index:
                 h1a = -mf_nuc.mol.intor('int1e_ipkin', comp=3)/(self.mol.mass[index]*nist.ATOMIC_MASS/nist.E_MASS)
                 h1a += mf_nuc.mol.intor('int1e_ipnuc', comp=3)*self.mol.atom_charge(index)
                 h1a += h1a.transpose(0, 2, 1)
-
-                r1a = -mf_nuc.mol.intor('int1e_irp', comp=9).reshape(3, 3, nao, nao)
-                r1a += r1a.transpose(0, 1, 3, 2)
-
-                s1a = -mf_nuc.mol.intor('int1e_ipovlp', comp=3)
-                s1ao = s1a + s1a.transpose(0, 2, 1)
-                s1oo = numpy.einsum('xpq,pi,qj->xij', s1ao, mocc, mocc)
 
             elif self.mol.quantum_nuc[ia] == False:
                 with mf_nuc.mol.with_rinv_as_nucleus(ia):
@@ -200,22 +182,8 @@ class Hessian(lib.StreamObject):
 
             for j0 in range(i0+1):
                 ja = self.atmlst[j0]
-                # if ia == index: # test
-                #    de2[i0, j0] -= f1[ja]
-
                 dm1_n = numpy.einsum('ypi,qi->ypq', mo1_n[ja], mocc)
-
                 de2[i0, j0] += numpy.einsum('xpq,ypq->xy', h1a, dm1_n)*2 # *2 for c.c. of dm1
-
-                r1a_f = numpy.einsum('xypq, y->xpq', r1a, self.base.f[index])
-                de2[i0, j0] += numpy.einsum('xpq,ypq->xy', r1a_f, dm1_n)*2
-
-                r1a_dm = numpy.einsum('xzpq, pq->xz', r1a, dm0_n)
-                # de2[i0, j0] += numpy.einsum('xz, zy->xy', r1a_dm, f1[ja]) # test: yz or zy?
-
-                dm1_n = numpy.einsum('ypi,qi,i->ypq', mo1_n[ja], mocc, mo_energy[mo_occ>0])
-                de2[i0, j0] -= numpy.einsum('xpq,ypq->xy', s1ao, dm1_n)*2
-                de2[i0, j0] -= numpy.einsum('xpq,ypq->xy', s1oo, e1_n[ja])
 
             for j0 in range(i0):
                 de2[j0, i0] = de2[i0, j0].T
@@ -237,7 +205,7 @@ class Hessian(lib.StreamObject):
         mo_coeff = mf_nuc.mo_coeff
         mo_occ = mf_nuc.mo_occ
         mocc = mo_coeff[:, mo_occ>0]
-        nao, nmo = mo_coeff.shape
+        nao = mo_coeff.shape[0]
         dme0 = numpy.einsum('pi,qi,i->pq', mocc, mocc, mo_energy[mo_occ>0])
 
         for i0, ia in enumerate(self.atmlst):
@@ -249,25 +217,12 @@ class Hessian(lib.StreamObject):
                 h1aa = h1aa.reshape(3, 3, nao, nao)
                 h1aa += h1aa.transpose(0, 1, 3, 2)
 
-                s1aa = mf_nuc.mol.intor('int1e_ipipovlp', comp=9)
-                s1aa += mf_nuc.mol.intor('int1e_ipovlpip', comp=9)
-                s1aa = s1aa.reshape(3, 3, nao, nao)
-                s1aa += s1aa.transpose(0, 1, 3, 2)
-
-                r1aa = mf_nuc.mol.intor('int1e_ipipr', comp=27).reshape(3, 3, 3, nao, nao)
-                r1aa = numpy.einsum('xyzpq, z->xypq', r1aa, self.base.f[index])
-                r1aa2 = mf_nuc.mol.intor('int1e_iprip', comp=27).reshape(3, 3, 3, nao, nao)
-                r1aa += numpy.einsum('xyzpq, y->xzpq', r1aa2, self.base.f[index])
-                r1aa += r1aa.transpose(0, 1, 3, 2)
-
                 de2[i0, i0] += numpy.einsum('xypq, pq->xy', h1aa, dm0_n)
-                de2[i0, i0] -= numpy.einsum('xypq, pq->xy', s1aa, dme0)
-                de2[i0, i0] += numpy.einsum('xypq, pq->xy', r1aa, dm0_n)
 
                 # for j0, ja in enumerate(self.atmlst):
                 for j0 in range(i0+1):
                     ja = self.atmlst[j0]
-                    if self.mol.quantum_nuc[ja] == False:
+                    if self.mol.quantum_nuc[ja] is False:
                         with mf_nuc.mol.with_rinv_at_nucleus(ja):
                             rinv_ab = -mf_nuc.mol.intor('int1e_ipiprinv', comp=9).reshape(3, 3, nao, nao)
                             rinv_ab -= mf_nuc.mol.intor('int1e_iprinvip', comp=9).reshape(3, 3, nao, nao)
