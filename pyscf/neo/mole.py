@@ -44,7 +44,7 @@ class Mole(gto.mole.Mole):
         nuc.atom_index = atom_index
 
         dirnow = os.path.realpath(os.path.join(__file__, '..'))
-        if self.atom_symbol(atom_index) == 'H@2':
+        if 'H+' in self.atom_symbol(atom_index): # Deuterium
             basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/s-pb4d.dat')).read())
         elif self.atom_pure_symbol(atom_index) == 'H':
             basis = gto.basis.parse(open(os.path.join(dirnow, 'basis/pb4d.dat')).read())
@@ -95,7 +95,7 @@ class Mole(gto.mole.Mole):
 
         self.mass = self.atom_mass_list(isotope_avg=True)
         for i in range(len(self.mass)):
-            if self.atom_symbol(i) == 'H@2': # Deuterium (from Wikipedia)
+            if 'H+' in self.atom_symbol(i): # Deuterium (from Wikipedia)
                 self.mass[i] = 2.01410177811
             elif self.atom_symbol(i) == 'H@0': # Muonium (TODO: precise mass)
                 self.mass[i] = 0.114
