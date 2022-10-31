@@ -13,11 +13,14 @@ class Mole(gto.mole.Mole):
 
     >>> from pyscf import neo
     >>> mol = neo.Mole()
-    >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', quantum_nuc = [0,1], basis = 'ccpvdz')
-    # H and C would be treated quantum mechanically
-    >>> mol.build(atom = 'H 0 0 0; C 0 0 1.1; N 0 0 2.2', basis = 'ccpvdz')
-    # All atoms are treated quantum mechanically by default
-
+    >>> mol.build(atom = 'H 0.00 0.76 -0.48; H 0.00 -0.76 -0.48; O 0.00 0.00 0.00', basis = 'ccpvdz')
+    # All hydrogen atoms are treated quantum mechanically by default
+    >>> mol.build(atom = 'H 0.00 0.76 -0.48; H 0.00 -0.76 -0.48; O 0.00 0.00 0.00', quantum_nuc = [0,1], basis = 'ccpvdz')
+    # Explictly assign the first two H atoms to be treated quantum mechanically
+    >>> mol.build(atom = 'H 0.00 0.76 -0.48; H 0.00 -0.76 -0.48; O 0.00 0.00 0.00', quantum_nuc = ['H'], basis = 'ccpvdz')
+    # All hydrogen atoms are treated quantum mechanically
+    >>> mol.build(atom = 'H0 0.00 0.76 -0.48; H1 0.00 -0.76 -0.48; O 0.00 0.00 0.00', quantum_nuc = ['H'], basis = 'ccpvdz')
+    # Avoid repeated nuclear basis by labelling atoms of the same type
     '''
 
     def __init__(self, **kwargs):
@@ -75,21 +78,21 @@ class Mole(gto.mole.Mole):
 
         return nuc
 
-    def build(self, quantum_nuc = 'all', nuc_basis = 'etbs', **kwargs):
+    def build(self, quantum_nuc = ['H'], nuc_basis = 'etbs', **kwargs):
         'assign which nuclei are treated quantum mechanically by quantum_nuc (list)'
         super().build(self, **kwargs)
 
         self.quantum_nuc = [False]*self.natm
-
-        if quantum_nuc == 'all':
-            self.quantum_nuc = [True]*self.natm
-            logger.info(self, 'All atoms are treated quantum-mechanically by default.')
-        elif isinstance(quantum_nuc, list):
-            for i in quantum_nuc:
+        
+        for i in quantum_nuc:
+            if isinstance(i, int):
                 self.quantum_nuc[i] = True
                 logger.info(self, 'The %s(%i) atom is treated quantum-mechanically' %(self.atom_symbol(i), i))
-        else:
-            raise TypeError('Unsupported parameter %s' %(quantum_nuc))
+            elif isinstance(i, str):
+                for j in range(self.natm):
+                    if i in self.atom_symbol(j):
+                        self.quantum_nuc[j] = True
+                logger.info(self, 'All %s atoms are treated quantum-mechanically' %i)
 
         self.nuc_num = len([i for i in self.quantum_nuc if i == True])
 
