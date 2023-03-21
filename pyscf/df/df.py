@@ -23,6 +23,7 @@ J-metric density fitting
 
 import copy
 import tempfile
+import contextlib
 import numpy
 import h5py
 from pyscf import lib
@@ -62,8 +63,8 @@ class DF(lib.StreamObject):
             'j3c'.
             The DF integral tensor :math:`V_{x,ij}` should be a 2D array in C
             (row-major) convention, where x corresponds to index of auxiliary
-            basis, and the combined index ij is the orbital pair index. The
-            hermitian symmetry is assumed for the combined ij index, ie
+            basis, and the composite index ij is the orbital pair index. The
+            hermitian symmetry is assumed for the composite ij index, ie
             the elements of :math:`V_{x,i,j}` with :math:`i\geq j` are existed
             in the DF integral tensor.  Thus the shape of DF integral tensor
             is (M,N*(N+1)/2), where M is the number of auxbasis functions and
@@ -235,14 +236,7 @@ class DF(lib.StreamObject):
             return df_jk.get_jk(self, dm, hermi, with_j, with_k, direct_scf_tol)
 
         # A temporary treatment for RSH-DF integrals
-        key = '%.6f' % omega
-        if key in self._rsh_df:
-            rsh_df = self._rsh_df[key]
-        else:
-            rsh_df = self._rsh_df[key] = copy.copy(self).reset()
-            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
-
-        with rsh_df.mol.with_range_coulomb(omega):
+        with self.range_coulomb(omega) as rsh_df:
             return df_jk.get_jk(rsh_df, dm, hermi, with_j, with_k, direct_scf_tol)
 
     def get_eri(self):
@@ -273,6 +267,39 @@ class DF(lib.StreamObject):
             lib.dot(Lij.T, Lkl, 1, mo_eri, 1)
         return mo_eri
     get_mo_eri = ao2mo
+
+    @contextlib.contextmanager
+    def range_coulomb(self, omega):
+        '''Creates a temporary density fitting object for RSH-DF integrals.
+        In this context, only LR or SR integrals for mol and auxmol are computed.
+        '''
+        key = '%.6f' % omega
+        if key in self._rsh_df:
+            rsh_df = self._rsh_df[key]
+        else:
+            rsh_df = self._rsh_df[key] = copy.copy(self).reset()
+            logger.info(self, 'Create RSH-DF object %s for omega=%s', rsh_df, omega)
+
+        mol = self.mol
+        auxmol = self.auxmol
+
+        mol_omega = mol.omega
+        mol.omega = omega
+        auxmol_omega = None
+        if auxmol is not None:
+            auxmol_omega = auxmol.omega
+            auxmol.omega = omega
+
+        assert rsh_df.mol.omega == omega
+        if rsh_df.auxmol is not None:
+            assert rsh_df.auxmol.omega == omega
+
+        try:
+            yield rsh_df
+        finally:
+            mol.omega = mol_omega
+            if auxmol_omega is not None:
+                auxmol.omega = auxmol_omega
 
 GDF = DF
 

@@ -87,10 +87,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         logger.debug(ks, 'nelec by numeric integration = %s', n)
         t0 = logger.timer(ks, 'vxc', *t0)
 
-    #enabling range-separated hybrids
-    omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
-
-    if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
+    if not ni.libxc.is_hybrid_xc(ks.xc):
         vk = None
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vj', None) is not None):
@@ -101,12 +98,13 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             vj = ks.get_j(mol, dm, hermi)
         vxc += vj
     else:
+        omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
         if (ks._eri is None and ks.direct_scf and
             getattr(vhf_last, 'vk', None) is not None):
             ddm = numpy.asarray(dm) - numpy.asarray(dm_last)
             vj, vk = ks.get_jk(mol, ddm, hermi)
             vk *= hyb
-            if abs(omega) > 1e-10:  # For range separated Coulomb operator
+            if omega != 0:  # For range separated Coulomb
                 vklr = ks.get_k(mol, ddm, hermi, omega=omega)
                 vklr *= (alpha - hyb)
                 vk += vklr
@@ -115,7 +113,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         else:
             vj, vk = ks.get_jk(mol, dm, hermi)
             vk *= hyb
-            if abs(omega) > 1e-10:
+            if omega != 0:
                 vklr = ks.get_k(mol, dm, hermi, omega=omega)
                 vklr *= (alpha - hyb)
                 vk += vklr
@@ -247,19 +245,9 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
     return e1+e2, e2
 
 
-NELEC_ERROR_TOL = getattr(__config__, 'dft_rks_prune_error_tol', 0.02)
 def prune_small_rho_grids_(ks, mol, dm, grids):
     rho = ks._numint.get_rho(mol, dm, grids, ks.max_memory)
-    n = numpy.dot(rho, grids.weights)
-    if abs(n-mol.nelectron) < NELEC_ERROR_TOL*n:
-        rho *= grids.weights
-        idx = abs(rho) > ks.small_rho_cutoff / grids.weights.size
-        logger.debug(ks, 'Drop grids %d',
-                     grids.weights.size - numpy.count_nonzero(idx))
-        grids.coords  = numpy.asarray(grids.coords [idx], order='C')
-        grids.weights = numpy.asarray(grids.weights[idx], order='C')
-        grids.non0tab = grids.make_mask(mol, grids.coords)
-    return grids
+    return grids.prune_by_density_(rho, ks.small_rho_cutoff)
 
 def define_xc_(ks, description, xctype='LDA', hyb=0, rsh=(0,0,0)):
     libxc = ks._numint.libxc

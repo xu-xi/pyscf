@@ -60,8 +60,7 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if kpts is None: kpts = ks.kpts
     t0 = (logger.process_clock(), logger.perf_counter())
 
-    omega, alpha, hyb = ks._numint.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
-    hybrid = abs(hyb) > 1e-10 or abs(alpha) > 1e-10
+    hybrid = ks._numint.libxc.is_hybrid_xc(ks.xc)
 
     if not hybrid and isinstance(ks.with_df, multigrid.MultiGridFFTDF):
         n, exc, vxc = multigrid.nr_rks(ks.with_df, ks.xc, dm, hermi,
@@ -86,21 +85,25 @@ def get_veff(ks, cell=None, dm=None, dm_last=0, vhf_last=0, hermi=1,
     if hermi == 2:  # because rho = 0
         n, exc, vxc = 0, 0, 0
     else:
+        max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ks._numint.nr_rks(cell, ks.grids, ks.xc, dm, hermi,
-                                        kpts, kpts_band)
+                                        kpts, kpts_band, max_memory=max_memory)
         logger.debug(ks, 'nelec by numeric integration = %s', n)
         t0 = logger.timer(ks, 'vxc', *t0)
 
     weight = 1./len(kpts)
     if not hybrid:
+        ks.with_df._j_only = False
         vj = ks.get_j(cell, dm, hermi, kpts, kpts_band)
         vxc += vj
     else:
+        omega, alpha, hyb = ks._numint.rsh_and_hybrid_coeff(ks.xc, spin=cell.spin)
         if getattr(ks.with_df, '_j_only', False):  # for GDF and MDF
+            logger.warn(ks, 'df.j_only cannot be used with hybrid functional')
             ks.with_df._j_only = False
         vj, vk = ks.get_jk(cell, dm, hermi, kpts, kpts_band)
         vk *= hyb
-        if abs(omega) > 1e-10:
+        if omega != 0:
             vklr = ks.get_k(cell, dm, hermi, kpts, kpts_band, omega=omega)
             vklr *= (alpha - hyb)
             vk += vklr
@@ -143,7 +146,7 @@ def energy_elec(mf, dm_kpts=None, h1e_kpts=None, vhf=None):
     logger.debug(mf, 'E1 = %s  Ecoul = %s  Exc = %s', e1, vhf.ecoul, vhf.exc)
     return tot_e.real, vhf.ecoul + vhf.exc
 
-class KRKS(rks.KohnShamDFT, khf.KRHF):
+class KRKS(khf.KRHF, rks.KohnShamDFT):
     '''RKS class adapted for PBCs with k-point sampling.
     '''
     def __init__(self, cell, kpts=np.zeros((1,3)), xc='LDA,VWN',
