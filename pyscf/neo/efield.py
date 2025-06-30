@@ -170,6 +170,9 @@ class SCFwithEfield(CDFT):
         E_nuc_field = -numpy.sum([Z * numpy.dot(self.efield, R) for Z, R in zip(nuclear_charges, nuclear_coords)])
 
         return enuc + E_nuc_field
+    
+    def nuc_grad_method(self):
+        return GradwithEfield(self)
 
 
 class GradwithEfield(Gradients):
