@@ -15,6 +15,11 @@ from pyscf.data import nist
 from pyscf.lib import logger
 from pyscf.scf import _vhf, chkfile
 from pyscf.scf.hf import TIGHT_GRAD_CONV_TOL
+from pyscf.lib.exceptions import PointGroupSymmetryError
+from pyscf import __config__
+
+WITH_META_LOWDIN = getattr(__config__, 'scf_analyze_with_meta_lowdin', True)
+PRE_ORTH_METHOD = getattr(__config__, 'scf_analyze_pre_orth_method', 'ANO')
 
 
 def dot_eri_dm(eri, dms, nao_v=None, eri_dot_dm=True):
@@ -326,15 +331,45 @@ class ComponentSCF(Component):
         '''Support fractional occupation. For nucleus, make sure it is a single particle'''
         if mo_energy is None: mo_energy = self.mo_energy
         if self.is_nucleus:
-            e_idx = numpy.argsort(mo_energy)
-            mo_occ = numpy.zeros(mo_energy.size)
-            mo_occ[e_idx[self.nuc_occ_state]] = self.mol.nnuc # 1 or fractional
+            mo_occ = numpy.zeros_like(mo_energy)
+            if self.mol.symmetry:
+                if self.nuc_occ_state != 0:
+                    raise NotImplementedError('With symmetry the nucleus must occupy ground state.')
+                # MO's are not sorted, but grouped according to symmetry
+                # copied from scf.hf_symm
+                mol = self.mol
+                orbsym = self.get_orbsym(mo_coeff)
+                rest_idx = numpy.ones(mo_occ.size, dtype=bool)
+                nelec_fix = 0
+                for i, ir in enumerate(mol.irrep_id):
+                    irname = mol.irrep_name[i]
+                    if irname in self.irrep_nelec:
+                        ir_idx = numpy.where(orbsym == ir)[0]
+                        n = self.irrep_nelec[irname]
+                        occ_sort = numpy.argsort(mo_energy[ir_idx].round(9), kind='stable')
+                        occ_idx  = ir_idx[occ_sort[:n//2]]
+                        mo_occ[occ_idx] = self.mol.nnuc
+                        nelec_fix += n
+                        rest_idx[ir_idx] = False
+                nelec_float = mol.nelectron - nelec_fix
+                assert (nelec_float >= 0)
+                if nelec_float > 0:
+                    rest_idx = numpy.where(rest_idx)[0]
+                    occ_sort = numpy.argsort(mo_energy[rest_idx].round(9), kind='stable')
+                    occ_idx  = rest_idx[occ_sort[:nelec_float//2]]
+                    mo_occ[occ_idx] = self.mol.nnuc
+                assert numpy.sum(mo_occ > 0) == 1 # ensure singly occupied
+            else:
+                e_idx = numpy.argsort(mo_energy)
+                mo_occ[e_idx[self.nuc_occ_state]] = self.mol.nnuc # 1 or fractional
             return mo_occ
         else:
             if self.mol.nhomo is None:
                 return super().get_occ(mo_energy, mo_coeff)
             else:
                 assert isinstance(self, scf.uhf.UHF)
+                if self.mol.symmetry:
+                    raise NotImplementedError('Fractional does not support symmetry yet.')
                 e_idx_a = numpy.argsort(mo_energy[0])
                 e_idx_b = numpy.argsort(mo_energy[1])
                 e_sort_a = mo_energy[0][e_idx_a]
@@ -407,6 +442,28 @@ class ComponentSCF(Component):
 
     def scf(self, dm0=None, **kwargs):
         raise AttributeError('scf should not be called from ComponentSCF')
+
+    def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        if self.is_nucleus:
+            return None
+        return super().mulliken_pop(mol, dm, s, verbose)
+
+    def mulliken_meta(self, mol=None, dm=None, verbose=logger.DEBUG,
+                      pre_orth_method=PRE_ORTH_METHOD, s=None):
+        if self.is_nucleus:
+            return None
+        return super().mulliken_meta(mol, dm, verbose, pre_orth_method, s)
+
+    def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None, verbose=logger.NOTE,
+                   **kwargs):
+        if self.is_nucleus:
+            return None
+        # Temporarily modify charge to supress warning about nonzero charge for a neutral molecule
+        charge = self.mol.charge
+        self.mol.charge = self.mol.super_mol.charge
+        dip = super().dip_moment(mol, dm, unit, origin=origin, verbose=verbose, **kwargs)
+        self.mol.charge = charge
+        return dip
 
     def to_gpu(self):
         obj = self.undo_component().to_gpu()
@@ -960,6 +1017,10 @@ class HF(scf.hf.SCF):
     def check_sanity(self):
         return self.components['e'].check_sanity()
 
+    def build(self, mol=None):
+        if mol is None: mol = self.mol
+        return self.components['e'].build(mol=mol.components['e'])
+
     def eig(self, h, s):
         e = {}
         c = {}
@@ -1159,6 +1220,76 @@ class HF(scf.hf.SCF):
         return self.e_tot
     kernel = lib.alias(scf, alias_name='kernel')
 
+    def _finalize(self):
+        super()._finalize()
+        # scf.hf_symm and scf.uhf_symm
+        if self.mol.symmetry:
+            for t, comp in self.components.items():
+                if isinstance(comp, scf.uhf.UHF):
+                    ea = numpy.hstack(comp.mo_energy[0])
+                    eb = numpy.hstack(comp.mo_energy[1])
+                    # Using mergesort because it is stable. We don't want to change the
+                    # ordering of the symmetry labels when two orbitals are degenerated.
+                    oa_sort = numpy.argsort(ea[comp.mo_occ[0]>0 ].round(9), kind='stable')
+                    va_sort = numpy.argsort(ea[comp.mo_occ[0]==0].round(9), kind='stable')
+                    ob_sort = numpy.argsort(eb[comp.mo_occ[1]>0 ].round(9), kind='stable')
+                    vb_sort = numpy.argsort(eb[comp.mo_occ[1]==0].round(9), kind='stable')
+                    idxa = numpy.arange(ea.size)
+                    idxa = numpy.hstack((idxa[comp.mo_occ[0]> 0][oa_sort],
+                                         idxa[comp.mo_occ[0]==0][va_sort]))
+                    idxb = numpy.arange(eb.size)
+                    idxb = numpy.hstack((idxb[comp.mo_occ[1]> 0][ob_sort],
+                                         idxb[comp.mo_occ[1]==0][vb_sort]))
+                    self.mo_energy[t] = comp.mo_energy = (ea[idxa], eb[idxb])
+                    orbsyma, orbsymb = comp.get_orbsym(comp.mo_coeff)
+                    orbsyma = orbsyma[idxa]
+                    orbsymb = orbsymb[idxb]
+                    degen_a = degen_b = None
+                    if self.mol.components[t].groupname in ('Dooh', 'Coov'):
+                        try:
+                            degen_a = scf.hf_symm.map_degeneracy(comp.mo_energy[0], orbsyma)
+                            degen_b = scf.hf_symm.map_degeneracy(comp.mo_energy[1], orbsymb)
+                        except PointGroupSymmetryError:
+                            logger.warn(self, 'Orbital degeneracy broken')
+                    if degen_a is None or degen_b is None:
+                        mo_a = lib.tag_array(comp.mo_coeff[0][:,idxa], orbsym=orbsyma)
+                        mo_b = lib.tag_array(comp.mo_coeff[1][:,idxb], orbsym=orbsymb)
+                    else:
+                        mo_a = lib.tag_array(comp.mo_coeff[0][:,idxa], orbsym=orbsyma,
+                                             degen_mapping=degen_a)
+                        mo_b = lib.tag_array(comp.mo_coeff[1][:,idxb], orbsym=orbsymb,
+                                             degen_mapping=degen_b)
+                    self.mo_coeff[t] = comp.mo_coeff = (mo_a, mo_b)
+                    self.mo_occ[t] = comp.mo_occ = numpy.asarray([comp.mo_occ[0][idxa], comp.mo_occ[1][idxb]])
+                else:
+                    # sort MOs wrt orbital energies, it should be done last.
+                    # Using mergesort because it is stable. We don't want to change the
+                    # ordering of the symmetry labels when two orbitals are degenerated.
+                    o_sort = numpy.argsort(comp.mo_energy[comp.mo_occ> 0].round(9), kind='stable')
+                    v_sort = numpy.argsort(comp.mo_energy[comp.mo_occ==0].round(9), kind='stable')
+                    idx = numpy.arange(comp.mo_energy.size)
+                    idx = numpy.hstack((idx[comp.mo_occ> 0][o_sort],
+                                        idx[comp.mo_occ==0][v_sort]))
+                    self.mo_energy[t] = comp.mo_energy = comp.mo_energy[idx]
+                    self.mo_occ[t] = comp.mo_occ = comp.mo_occ[idx]
+                    orbsym = comp.get_orbsym(comp.mo_coeff)
+                    orbsym = orbsym[idx]
+                    degen_mapping = None
+                    if self.mol.components[t].groupname in ('Dooh', 'Coov'):
+                        try:
+                            degen_mapping = scf.hf_symm.map_degeneracy(comp.mo_energy, orbsym)
+                        except PointGroupSymmetryError:
+                            logger.warn(self, 'Orbital degeneracy broken')
+                    if degen_mapping is None:
+                        self.mo_coeff[t] = comp.mo_coeff = lib.tag_array(comp.mo_coeff[:,idx], orbsym=orbsym)
+                    else:
+                        self.mo_coeff[t] = comp.mo_coeff = lib.tag_array(
+                            comp.mo_coeff[:,idx], orbsym=orbsym, degen_mapping=degen_mapping)
+            if self.chkfile:
+                chkfile.dump_scf(self.mol, self.chkfile, self.e_tot, self.mo_energy,
+                                 self.mo_coeff, self.mo_occ, overwrite_mol=False)
+            return self
+
     def get_jk(self, mol=None, dm=None, hermi=1, with_j=True, with_k=True,
                omega=None):
         raise AttributeError('get_jk should not be called from multi-component SCF')
@@ -1198,20 +1329,51 @@ class HF(scf.hf.SCF):
         return vint
 
     def mulliken_pop(self, mol=None, dm=None, s=None, verbose=logger.DEBUG):
+        # Electronic only
+        if hasattr(mol, 'components'):
+            mol = mol.components['e']
+        if isinstance(dm, dict) and 'e' in dm:
+            dm = dm['e']
+        if isinstance(s, dict) and 'e' in s:
+            s = s['e']
+        logger.note(self, 'Mulliken for electronic part only!\n'
+                    +'Quantum nuclear charges are not considered.')
         return self.components['e'].mulliken_pop(mol, dm, s, verbose)
 
     def mulliken_meta(self, mol=None, dm=None, verbose=logger.DEBUG,
-                      pre_orth_method=None, s=None):
-        if pre_orth_method is not None:
-            return self.components['e'].mulliken_meta(mol, dm, verbose, pre_orth_method, s)
-        return self.components['e'].mulliken_meta(mol, dm, verbose, s=s)
+                      pre_orth_method=PRE_ORTH_METHOD, s=None):
+        # Electronic only
+        if hasattr(mol, 'components'):
+            mol = mol.components['e']
+        if isinstance(dm, dict) and 'e' in dm:
+            dm = dm['e']
+        if isinstance(s, dict) and 'e' in s:
+            s = s['e']
+        logger.note(self, 'Mulliken for electronic part only!\n'
+                    +'Quantum nuclear charges are not considered.')
+        return self.components['e'].mulliken_meta(mol, dm, verbose, pre_orth_method, s)
+
+    def analyze(self, verbose=None, with_meta_lowdin=WITH_META_LOWDIN,
+                **kwargs):
+        if verbose is None: verbose = self.verbose
+        log = logger.new_logger(self, verbose)
+        pop_and_charge = {}
+        dip = {}
+        for t, comp in self.components.items():
+            log.note(f'\nAnalyze for {t}:')
+            pop_and_charge[t], dip[t] = comp.analyze(verbose, with_meta_lowdin, **kwargs)
+        # NOTE: dipole moment for each component reported here are incomplete
+        # and should not be used. Use dip_moment from cdft.
+        logger.note(self, 'Mulliken and dipole moment for electronic part only!\n'
+                    +'Contributions from quantum nuclear charges are not considered.')
+        return pop_and_charge, dip
 
     def canonicalize(self, mo_coeff, mo_occ, fock=None):
-        raise NotImplementedError
+        raise NotImplementedError('Please perform canonicalization for each component individually.')
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
                    verbose=logger.NOTE, **kwargs):
-        raise NotImplementedError # CDFT will have this
+        raise TypeError('Use CDFT to calculate total dipole moment.') # CDFT will have this
 
     def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
                     verbose=logger.NOTE, **kwargs):
