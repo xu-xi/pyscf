@@ -22,6 +22,9 @@ from pyscf.tdscf import rks
 from pyscf.pbc.tdscf import rhf
 from pyscf.pbc.lib.kpts_helper import gamma_point
 
+class TDA(rhf.TDA):
+    pass
+
 RPA = TDRKS = TDDFT = rhf.TDHF
 
 class CasidaTDDFT(TDDFT):
@@ -32,15 +35,15 @@ class CasidaTDDFT(TDDFT):
 
 TDDFTNoHybrid = CasidaTDDFT
 
-def tddft(mf):
+def tddft(mf, frozen=None):
     '''Driver to create TDDFT or CasidaTDDFT object'''
     kpt = getattr(mf, 'kpt', None)
     if not mf._numint.libxc.is_hybrid_xc(mf.xc) and gamma_point(kpt):
-        return CasidaTDDFT(mf)
+        return CasidaTDDFT(mf, frozen)
     else:
-        return TDDFT(mf)
+        return TDDFT(mf, frozen)
 
-dft.rks.RKS.TDA           = lib.class_as_method(rhf.TDA)
+dft.rks.RKS.TDA           = lib.class_as_method(TDA)
 dft.rks.RKS.TDHF          = None
 dft.rks.RKS.TDDFTNoHybrid = tddft
 dft.rks.RKS.CasidaTDDFT   = lib.class_as_method(CasidaTDDFT)

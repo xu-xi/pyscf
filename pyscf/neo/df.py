@@ -345,21 +345,23 @@ class _DFNEO:
 
     def __init__(self, mf, auxbasis=None, ee_only_dfj=False, df_ne=False):
         self.__dict__.update(mf.__dict__)
+        self.auxbasis = auxbasis
         self.ee_only_dfj = ee_only_dfj
         self.df_ne = df_ne
 
-        self.auxbasis = auxbasis
+        # copy direct_scf_tol, which is not in __dict__
+        self.direct_scf_tol = getattr(mf, 'direct_scf_tol')
 
         if isinstance(mf, neo.KS):
             self.interactions = hf.generate_interactions(
                 self.components, DFInteractionCorrelation,
-                self.max_memory, df_ne=self.df_ne,
-                auxbasis=self.auxbasis, epc=mf.epc)
+                self.max_memory, self.direct_scf_tol,
+                df_ne=self.df_ne, auxbasis=self.auxbasis, epc=mf.epc)
         else:
             self.interactions = hf.generate_interactions(
                 self.components, DFInteractionCoulomb,
-                self.max_memory, df_ne=self.df_ne,
-                auxbasis=self.auxbasis)
+                self.max_memory, self.direct_scf_tol,
+                df_ne=self.df_ne, auxbasis=self.auxbasis)
 
     def nuc_grad_method(self):
         import pyscf.neo.df_grad
@@ -376,16 +378,17 @@ class _DFNEO:
             self.components['e'] = density_fit_e(self.components['e'],
                                                  auxbasis=self.auxbasis,
                                                  only_dfj=self.ee_only_dfj)
+            self.interactions.clear()
             if isinstance(self, neo.KS):
-                self.interactions = hf.generate_interactions(
+                self.interactions.update(hf.generate_interactions(
                     self.components, DFInteractionCorrelation,
-                    self.max_memory, df_ne=self.df_ne,
-                    auxbasis=self.auxbasis, epc=self.epc)
+                    self.max_memory, self.direct_scf_tol,
+                    df_ne=self.df_ne, auxbasis=self.auxbasis, epc=self.epc))
             else:
-                self.interactions = hf.generate_interactions(
+                self.interactions.update(hf.generate_interactions(
                     self.components, DFInteractionCoulomb,
-                    self.max_memory, df_ne=self.df_ne,
-                    auxbasis=self.auxbasis)
+                    self.max_memory, self.direct_scf_tol,
+                    df_ne=self.df_ne, auxbasis=self.auxbasis))
         if self.components['e'].with_df is not None:
             self.components['e'].with_df._low = None
         for t, comp in self.interactions.items():

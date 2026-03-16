@@ -4,12 +4,11 @@
 Nuclear Electronic Orbital Hartree-Fock (NEO-HF)
 '''
 
-import copy
 import ctypes
 import h5py
 import numpy
-import scipy
 import warnings
+from scipy.special import erf
 from pyscf import df, gto, lib, neo, scf
 from pyscf.data import nist
 from pyscf.lib import logger
@@ -228,6 +227,7 @@ def general_scf(method, charge=1, mass=1, is_nucleus=False, nuc_occ_state=0):
         method.mass = mass
         method.is_nucleus = is_nucleus
         method.nuc_occ_state = nuc_occ_state
+        method._vint = None
         return method
     return lib.set_class(ComponentSCF(method, charge, mass, is_nucleus, nuc_occ_state),
                          (ComponentSCF, method.__class__))
@@ -247,6 +247,7 @@ class ComponentSCF(Component):
 
     def undo_component(self):
         obj = lib.view(self, lib.drop_class(self.__class__, Component))
+        del obj.charge, obj.mass, obj.is_nucleus, obj.nuc_occ_state, obj._vint
         return obj
 
     def get_hcore(self, mol=None):
@@ -358,10 +359,48 @@ class ComponentSCF(Component):
                     occ_sort = numpy.argsort(mo_energy[rest_idx].round(9), kind='stable')
                     occ_idx  = rest_idx[occ_sort[:nelec_float//2]]
                     mo_occ[occ_idx] = self.mol.nnuc
+
                 assert numpy.sum(mo_occ > 0) == 1 # ensure singly occupied
+
+                vir_idx = (mo_occ==0)
+                if self.verbose >= logger.INFO and numpy.count_nonzero(vir_idx) > 0:
+                    ehomo = max(mo_energy[~vir_idx])
+                    elumo = min(mo_energy[ vir_idx])
+                    noccs = []
+                    for i, ir in enumerate(mol.irrep_id):
+                        irname = mol.irrep_name[i]
+                        ir_idx = (orbsym == ir)
+
+                        noccs.append(int(mo_occ[ir_idx].sum()))
+                        if ehomo in mo_energy[ir_idx]:
+                            irhomo = irname
+                        if elumo in mo_energy[ir_idx]:
+                            irlumo = irname
+                    logger.info(self, 'CNEO NUC HOMO (%s) = %.15g  LUMO (%s) = %.15g',
+                                irhomo, ehomo, irlumo, elumo)
+
+                    logger.debug(self, 'CNEO NUC irrep_nelec = %s', noccs)
+                    scf.hf_symm._dump_mo_energy(mol, mo_energy, mo_occ, ehomo, elumo, orbsym,
+                                                title='CNEO NUC ', verbose=self.verbose)
             else:
                 e_idx = numpy.argsort(mo_energy)
+                e_sort = mo_energy[e_idx]
+                nmo = mo_energy.size
+                nocc = 1 # singly occupied nuclear orbital
                 mo_occ[e_idx[self.nuc_occ_state]] = self.mol.nnuc # 1 or fractional
+                assert nocc <= nmo
+                if self.verbose >= logger.INFO and nocc < nmo:
+                    if e_sort[nocc-1]+1e-3 > e_sort[nocc]:
+                        logger.warn(self, 'CNEO NUC HOMO %.15g == LUMO %.15g',
+                                    e_sort[nocc-1], e_sort[nocc])
+                    else:
+                        logger.info(self, '  CNEO NUC HOMO = %.15g  LUMO = %.15g',
+                                    e_sort[nocc-1], e_sort[nocc])
+
+                if self.verbose >= logger.DEBUG:
+                    numpy.set_printoptions(threshold=nmo)
+                    logger.debug(self, '  CNEO NUC mo_energy =\n%s', mo_energy)
+                    numpy.set_printoptions(threshold=1000)
             return mo_occ
         else:
             if self.mol.nhomo is None:
@@ -386,23 +425,26 @@ class ComponentSCF(Component):
                     mo_occ[1,e_idx_b[:n_b - 1]] = 1
                     mo_occ[1,e_idx_b[n_b - 1]] = self.mol.nhomo
                     mo_occ[0,e_idx_a[:n_a]] = 1
+                if n_a > nmo or n_b > nmo:
+                    raise RuntimeError('Failed to assign mo_occ. '
+                                       f'nelec ({n_a}, {n_b}) > Nmo ({nmo})')
                 if self.verbose >= logger.INFO and n_a < nmo and n_b > 0 and n_b < nmo:
                     if e_sort_a[n_a-1]+1e-3 > e_sort_a[n_a]:
-                        logger.warn(mf, 'alpha nocc = %d  HOMO %.15g >= LUMO %.15g',
+                        logger.warn(self, 'alpha nocc = %d  HOMO %.15g >= LUMO %.15g',
                                     n_a, e_sort_a[n_a-1], e_sort_a[n_a])
                     else:
-                        logger.info(mf, '  alpha nocc = %d  HOMO = %.15g  LUMO = %.15g',
+                        logger.info(self, '  alpha nocc = %d  HOMO = %.15g  LUMO = %.15g',
                                     n_a, e_sort_a[n_a-1], e_sort_a[n_a])
 
                     if e_sort_b[n_b-1]+1e-3 > e_sort_b[n_b]:
-                        logger.warn(mf, 'beta  nocc = %d  HOMO %.15g >= LUMO %.15g',
+                        logger.warn(self, 'beta  nocc = %d  HOMO %.15g >= LUMO %.15g',
                                     n_b, e_sort_b[n_b-1], e_sort_b[n_b])
                     else:
-                        logger.info(mf, '  beta  nocc = %d  HOMO = %.15g  LUMO = %.15g',
+                        logger.info(self, '  beta  nocc = %d  HOMO = %.15g  LUMO = %.15g',
                                     n_b, e_sort_b[n_b-1], e_sort_b[n_b])
 
                     if e_sort_a[n_a-1]+1e-3 > e_sort_b[n_b]:
-                        logger.warn(mf, 'system HOMO %.15g >= system LUMO %.15g',
+                        logger.warn(self, 'system HOMO %.15g >= system LUMO %.15g',
                                     e_sort_b[n_a-1], e_sort_b[n_b])
 
                     numpy.set_printoptions(threshold=nmo)
@@ -457,12 +499,20 @@ class ComponentSCF(Component):
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None, verbose=logger.NOTE,
                    **kwargs):
         if self.is_nucleus:
-            return None
+            if origin is None:
+                origin = numpy.zeros(3)
+            else:
+                origin = numpy.asarray(origin, dtype=numpy.float64)
+            assert origin.shape == (3,)
+            dip = -self.charge * (lib.einsum('xij,ji->x', self.mol.intor_symmetric('int1e_r', comp=3), dm) - origin)
+            if unit.upper() == 'DEBYE':
+                dip *= nist.AU2DEBYE
         # Temporarily modify charge to supress warning about nonzero charge for a neutral molecule
-        charge = self.mol.charge
-        self.mol.charge = self.mol.super_mol.charge
-        dip = super().dip_moment(mol, dm, unit, origin=origin, verbose=verbose, **kwargs)
-        self.mol.charge = charge
+        else:
+            charge = self.mol.charge
+            self.mol.charge = self.mol.super_mol.charge
+            dip = super().dip_moment(mol, dm, unit, origin=origin, verbose=verbose, **kwargs)
+            self.mol.charge = charge
         return dip
 
     def to_gpu(self):
@@ -484,22 +534,86 @@ def _build_eri(mol1, mol2, cart):
                                              size1, size1 + size2),
                                  aosym='s4')
 
+def _combine_dm(dm1, nao1, dm2, nao2):
+    # combine two dms into block-diagonal form
+    assert dm1 is not None or dm2 is not None
+
+    def _ndim(dm):
+        return 0 if dm is None else numpy.asarray(dm).ndim
+    ndim1 = _ndim(dm1)
+    ndim2 = _ndim(dm2)
+    if ndim1 and ndim2 and ndim1 != ndim2:
+        raise ValueError(f'dm1 has ndim={ndim1} but dm2 has ndim={ndim2}')
+    ndim = max(ndim1, ndim2, 2)
+
+    def _nset(dm):
+        if dm is None:
+            return 0
+        dm = numpy.asarray(dm)
+        if dm.ndim == 2:
+            return 1
+        elif dm.ndim == 3:
+            return dm.shape[0]
+        raise ValueError(f'Density matrix dimension must be 2 or 3, got {dm.ndim}')
+    n1 = _nset(dm1)
+    n2 = _nset(dm2)
+    if n1 and n2 and n1 != n2:
+        raise ValueError(f'dm1 has nset={n1} but dm2 has nset={n2}')
+    nset = max(n1, n2, 1)
+
+    nao = nao1 + nao2
+    if nset == 1 and ndim == 2:
+        dms = numpy.zeros((nao, nao))
+    else:
+        dms = numpy.zeros((nset, nao, nao))
+    if dm1 is not None:
+        dm1 = numpy.asarray(dm1)
+        if dm1.ndim == 2:
+            dms[..., :nao1, :nao1] = dm1
+        else:
+            dms[:, :nao1, :nao1] = dm1
+    if dm2 is not None:
+        dm2 = numpy.asarray(dm2)
+        if dm2.ndim == 2:
+            dms[..., nao1:, nao1:] = dm2
+        else:
+            dms[:, nao1:, nao1:] = dm2
+    return dms
+
 class InteractionCoulomb:
     '''Inter-component Coulomb interactions'''
-    def __init__(self, mf1_type, mf1, mf2_type, mf2, max_memory):
+    def __init__(self, mf1_type, mf1, mf2_type, mf2, max_memory, direct_scf_tol):
         self.mf1_type = mf1_type
         self.mf1 = mf1
         self.mf1_unrestricted = isinstance(self.mf1, scf.uhf.UHF)
         self.mf2_type = mf2_type
         self.mf2 = mf2
         self.mf2_unrestricted = isinstance(self.mf2, scf.uhf.UHF)
+        self.mol = self.mf1.mol + self.mf2.mol
         self.max_memory = max_memory
         self._eri = None # mol1: left; mol2: right
+        self.direct_scf_tol = direct_scf_tol
+        self._vhfopt = None
 
     def _is_mem_enough(self):
         nao1 = self.mf1.mol.nao_nr()
         nao2 = self.mf2.mol.nao_nr()
         return nao1**2*nao2**2*2/1e6+lib.current_memory()[0] < self.max_memory*.95
+
+    def _init_vhfopt(self):
+        opt = _vhf._VHFOpt(self.mol, 'int2e', 'CVHFnrs8_vj_prescreen',
+                           'CVHFnr_int2e_q_cond', None, self.direct_scf_tol)
+        return opt
+
+    def _vhfopt_set_dm(self, dm1, dm2):
+        nao1 = self.mf1.mol.nao_nr()
+        nao2 = self.mf2.mol.nao_nr()
+        dms = _combine_dm(dm1, nao1, dm2, nao2)
+
+        mol = self.mol
+        self._vhfopt._dmcondname = 'CVHFnr_dm_cond'
+        self._vhfopt.set_dm(dms, mol._atm, mol._bas, mol._env)
+        self._vhfopt._dmcondname = None # avoid set_dm in get_jk
 
     def get_vint(self, dm):
         '''Obtain vj for both components'''
@@ -543,24 +657,30 @@ class InteractionCoulomb:
                               +'might be slow. '
                               +f'PYSCF_MAX_MEMORY is set to {mol.max_memory} MB, '
                               +f'required memory: {mol1.nao**2*mol2.nao**2*2/1e6=:.2f} MB')
+            if self._vhfopt is None:
+                self._vhfopt = self._init_vhfopt()
+            self._vhfopt_set_dm(dm1, dm2)
             if dm1 is not None and dm2 is not None:
                 vj[self.mf1_type], vj[self.mf2_type] = \
                         scf.jk.get_jk((mol1, mol1, mol2, mol2),
                                       (dm2, dm1),
                                       scripts=('ijkl,lk->ij', 'ijkl,ji->kl'),
-                                      intor='int2e', aosym='s4')
+                                      intor='int2e', aosym='s4',
+                                      vhfopt=self._vhfopt)
             elif dm1 is not None:
                 vj[self.mf2_type] = \
                         scf.jk.get_jk((mol1, mol1, mol2, mol2),
                                       dm1,
                                       scripts='ijkl,ji->kl',
-                                      intor='int2e', aosym='s4')
+                                      intor='int2e', aosym='s4',
+                                      vhfopt=self._vhfopt)
             else:
                 vj[self.mf1_type] = \
                         scf.jk.get_jk((mol1, mol1, mol2, mol2),
                                       dm2,
                                       scripts='ijkl,lk->ij',
-                                      intor='int2e', aosym='s4')
+                                      intor='int2e', aosym='s4',
+                                      vhfopt=self._vhfopt)
         charge_product = self.mf1.charge * self.mf2.charge
         if self.mf1_type in vj:
             vj[self.mf1_type] *= charge_product
@@ -568,7 +688,8 @@ class InteractionCoulomb:
             vj[self.mf2_type] *= charge_product
         return vj
 
-def generate_interactions(components, interaction_class, max_memory, **kwagrs):
+def generate_interactions(components, interaction_class, max_memory,
+                          direct_scf_tol, **kwagrs):
     keys = sorted(components.keys())
 
     interactions = {}
@@ -577,7 +698,9 @@ def generate_interactions(components, interaction_class, max_memory, **kwagrs):
             if p1 != p2:
                 interaction = interaction_class(p1, components[p1],
                                                 p2, components[p2],
-                                                max_memory, **kwagrs)
+                                                max_memory,
+                                                direct_scf_tol,
+                                                **kwagrs)
                 interactions[(p1, p2)] = interaction
 
     return interactions
@@ -603,15 +726,23 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, vint=None, dm=None, cycle=-1,
     f0 = None
     if isinstance(mf, neo.CDFT):
         if diis_pos == 'pre' or diis_pos == 'both' or (cycle < 0 and diis is None):
-            # optimize f in cNEO
+            # optimize the Lagrange multiplier in CNEO
             for t, comp in mf.components.items():
                 if t.startswith('n'):
                     ia = comp.mol.atom_index
-                    opt = scipy.optimize.root(mf.position_analysis, mf.f[ia],
-                                              args=(comp, f[t], s1e[t]), method='hybr')
-                    logger.debug(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
-                                 (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
-                    logger.debug(mf, 'Position deviation: %s', opt.fun)
+                    opt = neo.cdft.solve_constraint(comp, f[t], s1e[t], mf.f[ia])
+                    mf.f[ia] = opt.x
+                    if opt.success:
+                        logger.debug(mf, 'CNEO NUC constraint optimization succeeded.')
+                        logger.debug(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
+                                     (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
+                        logger.debug(mf, 'Position deviation: %s', opt.fun)
+                    else:
+                        logger.warn(mf, 'CNEO NUC constraint optimization failed!')
+                        logger.warn(mf, f'scipy.optimize.least_squares message: {opt.message}')
+                        logger.warn(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
+                                    (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
+                        logger.warn(mf, 'Position deviation: %s', opt.fun)
 
         # For DIIS type 1, preserve original matrices
         if diis_type == 1:
@@ -694,11 +825,19 @@ def get_fock(mf, h1e=None, s1e=None, vhf=None, vint=None, dm=None, cycle=-1,
         for t, comp in mf.components.items():
             if t.startswith('n'):
                 ia = comp.mol.atom_index
-                opt = scipy.optimize.root(mf.position_analysis, mf.f[ia],
-                                          args=(comp, f0[t], s1e[t]), method='hybr')
-                logger.debug(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
-                             (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
-                logger.debug(mf, 'Position deviation: %s', opt.fun)
+                opt = neo.cdft.solve_constraint(comp, f0[t], s1e[t], mf.f[ia])
+                mf.f[ia] = opt.x
+                if opt.success:
+                    logger.debug(mf, 'CNEO NUC constraint optimization succeeded.')
+                    logger.debug(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
+                                 (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
+                    logger.debug(mf, 'Position deviation: %s', opt.fun)
+                else:
+                    logger.warn(mf, 'CNEO NUC constraint optimization failed!')
+                    logger.warn(mf, f'scipy.optimize.least_squares message: {opt.message}')
+                    logger.warn(mf, 'Lagrange multiplier of %s(%i) atom: %s' %
+                                (mf.mol.atom_symbol(ia), ia, mf.f[ia]))
+                    logger.warn(mf, 'Position deviation: %s', opt.fun)
 
         fock_add = mf.get_fock_add_cdft()
         for t in fock_add:
@@ -806,6 +945,8 @@ def kernel(mf, conv_tol=1e-10, conv_tol_grad=None,
             scf_conv = mf.check_convergence(locals())
         elif abs(e_tot-last_hf_e) < conv_tol and norm_gorb['e'] < conv_tol_grad:
             scf_conv = True
+        else:
+            scf_conv = False
 
         if dump_chk and mf.chkfile:
             mf.dump_chk(locals())
@@ -899,7 +1040,7 @@ class HF(scf.hf.SCF):
                     charge = -1.
                 self.components[t] = general_scf(mf, charge=charge)
         self.interactions = generate_interactions(self.components, InteractionCoulomb,
-                                                  self.max_memory)
+                                                  self.max_memory, self.direct_scf_tol)
 
     # mf_elec and mf_nuc for backward compatibility
     @property
@@ -1181,11 +1322,19 @@ class HF(scf.hf.SCF):
             mm_mol = self.mol.mm_mol
             coords = mm_mol.atom_coords()
             charges = mm_mol.atom_charges()
+            if mm_mol.charge_model == 'gaussian':
+                expnts = numpy.sqrt(mm_mol.get_zetas())
             mol_e = self.components['e'].mol
             for j in range(mol_e.natm):
                 q2, r2 = mol_e.atom_charge(j), mol_e.atom_coord(j)
                 r = lib.norm(r2-coords, axis=1)
-                nuc += q2*(charges/r).sum()
+                if mm_mol.charge_model != 'gaussian':
+                    nuc += q2*(charges/r).sum()
+                else:
+                    # * MM paritcles may be defined as a spreaded distribution. The
+                    # charge distribution may overlap to QM atoms and slightly affect
+                    # the interaction.
+                    nuc += q2*(charges*erf(expnts*r)/r).sum()
         return nuc
 
     def scf(self, dm0=None, **kwargs):
@@ -1373,7 +1522,26 @@ class HF(scf.hf.SCF):
 
     def dip_moment(self, mol=None, dm=None, unit='Debye', origin=None,
                    verbose=logger.NOTE, **kwargs):
-        raise TypeError('Use CDFT to calculate total dipole moment.') # CDFT will have this
+        if mol is None: mol = self.mol
+        if dm is None: dm = self.make_rdm1()
+        log = logger.new_logger(mol, verbose)
+
+        # Suppress warning about nonzero charge (if neutral)
+        charge = self.components['e'].mol.charge
+        self.components['e'].mol.charge = self.mol.charge
+        el_dip = self.components['e'].dip_moment(mol.components['e'],
+                                                 dm['e'], unit=unit,
+                                                 origin=origin, verbose=verbose-1)
+        self.components['e'].mol.charge = charge
+
+        # Quantum nuclei
+        nucl_dip = 0
+        for t, comp in self.components.items():
+            if t.startswith('n'):
+                nucl_dip += comp.dip_moment(mol.components[t], dm[t], unit=unit, origin=origin, verbose=verbose-1)
+        mol_dip = nucl_dip + el_dip
+        log.note('Dipole moment(X, Y, Z, Debye): %8.5f, %8.5f, %8.5f', *mol_dip)
+        return mol_dip
 
     def quad_moment(self, mol=None, dm=None, unit='DebyeAngstrom', origin=None,
                     verbose=logger.NOTE, **kwargs):
@@ -1407,6 +1575,26 @@ class HF(scf.hf.SCF):
         raise NotImplementedError
 
     as_scanner = as_scanner
+
+    def copy(self):
+        '''Shallow copy but special treatment for array/dict that may get in-place mutations'''
+        new = super().copy() # shallow copy
+
+        # Rebind attributes that will get in-place mutations
+        if hasattr(self, 'f') and self.f is not None:
+            new.f = numpy.array(self.f, copy=True)
+
+        new.components = {}
+        for t, comp in self.components.items():
+            new.components[t] = general_scf(comp.undo_component().copy(),
+                                            charge=comp.charge,
+                                            mass=comp.mass,
+                                            is_nucleus=comp.is_nucleus,
+                                            nuc_occ_state=comp.nuc_occ_state)
+
+        new.interactions = generate_interactions(new.components, InteractionCoulomb,
+                                                 new.max_memory, new.direct_scf_tol)
+        return new
 
     def reset(self, mol=None):
         '''Reset mol and relevant attributes associated to the old mol object'''
@@ -1443,8 +1631,9 @@ class HF(scf.hf.SCF):
                     if t.startswith('p'):
                         charge = -1.
                     self.components[t] = general_scf(mf, charge=charge)
-            self.interactions = generate_interactions(self.components, InteractionCoulomb,
-                                                      self.max_memory)
+            self.interactions.clear()
+            self.interactions.update(generate_interactions(self.components, InteractionCoulomb,
+                                                           self.max_memory, self.direct_scf_tol))
 
         return self
 

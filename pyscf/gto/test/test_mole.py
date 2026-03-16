@@ -127,7 +127,7 @@ C    SP
                  ['H3', ( 0, 0, 0)]]
         basis = {'H2':'sto3g', 'H3':'6-31g', 'H0':'sto3g', 'H1': '6-31g'}
         atmgroup = gto.mole.atom_types(atoms, basis)
-        self.assertEqual(atmgroup, {'H2': [2], 'H3': [3], 'H0': [0], 'H1': [1]})
+        self.assertEqual(atmgroup, {'H0': [0, 2], 'H1': [1, 3]})
 
     def test_input_symmetry(self):
         mol = gto.M(atom='H 0 0 -1; H 0 0 1', symmetry='D2h')
@@ -294,6 +294,10 @@ C    SP
     def test_format_basis(self):
         mol = gto.M(atom = '''O 0 0 0; 1 0 1 0; H 0 0 1''',
                     basis = {8: 'ccpvdz'})
+        self.assertEqual(mol.nao_nr(), 14)
+
+        mol = gto.M(atom = '''O 0 0 0; 1 0 1 0; H 0 0 1''',
+                    basis = {8: 'def2-SVP'})
         self.assertEqual(mol.nao_nr(), 14)
 
         mol = gto.M(atom = '''O 0 0 0; H:1 0 1 0; H@2 0 0 1''',
@@ -640,6 +644,10 @@ O    SP
         mol1.set_geom_(mol0.atom_coords(), unit=1.)
         mol1.set_geom_(mol0.atom_coords(), unit='Ang', inplace=False)
 
+        r = mol1.atom_coords(unit='Ang')
+        mol1.set_geom_(r, unit='Ang')
+        assert np.array_equal(mol1.atom_coords(unit='Ang'), r)
+
     def test_apply(self):
         from pyscf import scf, mp
         self.assertTrue(isinstance(mol0.apply('RHF'), scf.rohf.ROHF))
@@ -940,15 +948,25 @@ O    SP
         from pyscf import scf, dft, ci, tdscf
         mol = gto.M(atom='He')
         self.assertEqual(mol.HF().__class__, scf.HF(mol).__class__)
-        self.assertEqual(mol.KS().__class__, dft.KS(mol).__class__)
-        self.assertEqual(mol.UKS().__class__, dft.UKS(mol).__class__)
+        self.assertEqual(mol.KS(xc='pbe').__class__, dft.KS(mol, xc='pbe').__class__)
+        self.assertEqual(mol.KS(xc='pbe').xc, dft.KS(mol, xc='pbe').xc)
+        self.assertEqual(mol.UKS(xc='pbe').__class__, dft.UKS(mol, xc='pbe').__class__)
+        self.assertEqual(mol.UKS(xc='pbe').xc, dft.UKS(mol, xc='pbe').xc)
         self.assertEqual(mol.CISD().__class__, ci.cisd.RCISD)
         self.assertEqual(mol.TDA().__class__, tdscf.rhf.TDA)
+        self.assertEqual(mol.TDA(xc='pbe0').__class__, tdscf.rks.TDA)
         self.assertEqual(mol.dTDA().__class__, tdscf.rks.dTDA)
         self.assertEqual(mol.TDBP86().__class__, tdscf.rks.TDDFTNoHybrid)
         self.assertEqual(mol.TDB3LYP().__class__, tdscf.rks.TDDFT)
         self.assertRaises(AttributeError, lambda: mol.xyz)
-        self.assertRaises(AttributeError, lambda: mol.TDxyz)
+        self.assertRaises(AttributeError, lambda: mol.TDxyz())
+
+        mol = gto.M(atom='He', symmetry=True)
+        self.assertEqual(mol.HF().__class__, scf.HF(mol).__class__)
+        self.assertEqual(mol.KS().__class__, dft.KS(mol).__class__)
+        self.assertEqual(mol.UKS().__class__, dft.UKS(mol).__class__)
+        self.assertEqual(mol.RKSpU(U_idx=['2p'], U_val=[1.]).__class__,
+                         dft.RKSpU(mol, U_idx=['2p'], U_val=[1.]).__class__)
 
     def test_ao2mo(self):
         mol = gto.M(atom='He')

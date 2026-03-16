@@ -7,7 +7,6 @@ Analytic gradient for density-fitting interaction Coulomb in CDFT
 import numpy
 import scipy
 from pyscf import lib
-from pyscf.scf.jk import get_jk
 from pyscf.grad import rhf as rhf_grad
 from pyscf.neo import grad
 from pyscf.lib import logger

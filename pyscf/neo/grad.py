@@ -5,11 +5,13 @@ Analytic nuclear gradient for constrained nuclear-electronic orbital
 '''
 
 import numpy
+import ctypes
 import warnings
+from scipy.special import erf
 from pyscf import df, gto, lib, neo, scf
 from pyscf.grad import rhf as rhf_grad
 from pyscf.lib import logger
-from pyscf.scf import hf
+from pyscf.scf import hf, _vhf
 from pyscf.scf.jk import get_jk
 from pyscf.dft.numint import eval_ao, eval_rho, _scale_ao
 from pyscf.grad.rks import _d1_dot_
@@ -120,10 +122,39 @@ class ComponentGrad:
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         raise AttributeError
 
+def _make_vhfopt(mol, dms):
+    libcvhf = _vhf.libcvhf
+    vhfopt = _vhf._VHFOpt(mol, 'int2e_ip1', 'CVHFgrad_jk_prescreen',
+                          dmcondname=None)
+    ao_loc = mol.ao_loc_nr()
+    nbas = mol.nbas
+    q_cond = numpy.empty((2, nbas, nbas))
+    with mol.with_integral_screen(vhfopt.direct_scf_tol**2):
+        libcvhf.CVHFnr_int2e_pp_q_cond(
+            getattr(libcvhf, mol._add_suffix('int2e_ip1ip2')),
+            lib.c_null_ptr(), q_cond[0].ctypes,
+            ao_loc.ctypes, mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(nbas), mol._env.ctypes)
+        libcvhf.CVHFnr_int2e_q_cond(
+            getattr(libcvhf, mol._add_suffix('int2e')),
+            lib.c_null_ptr(), q_cond[1].ctypes,
+            ao_loc.ctypes, mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(nbas), mol._env.ctypes)
+    vhfopt.q_cond = q_cond
+
+    vhfopt._dmcondname = 'CVHFnr_dm_cond1'
+    vhfopt.set_dm(dms, mol._atm, mol._bas, mol._env)
+    vhfopt._dmcondname = None
+    return vhfopt
+
 def grad_pair_int(mol1, mol2, dm1, dm2, charge1, charge2, atmlst):
     de = numpy.zeros((len(atmlst),3))
     aoslices1 = mol1.aoslice_by_atom()
     aoslices2 = mol2.aoslice_by_atom()
+    nao1 = mol1.nao_nr()
+    nao2 = mol2.nao_nr()
+    vhfopt1 = _make_vhfopt(mol1 + mol2, neo.hf._combine_dm(dm1, nao1, dm2, nao2))
+    vhfopt2 = _make_vhfopt(mol2 + mol1, neo.hf._combine_dm(dm2, nao2, dm1, nao1))
     for i0, ia in enumerate(atmlst):
         shl0, shl1, p0, p1 = aoslices1[ia]
         # Derivative w.r.t. mol1
@@ -132,7 +163,7 @@ def grad_pair_int(mol1, mol2, dm1, dm2, charge1, charge2, atmlst):
             v1 = get_jk((mol1, mol1, mol2, mol2),
                         dm2, scripts='ijkl,lk->ij',
                         intor='int2e_ip1', aosym='s2kl', comp=3,
-                        shls_slice=shls_slice)
+                        shls_slice=shls_slice, vhfopt=vhfopt1)
             de[i0] -= 2. * charge1 * charge2 * \
                       numpy.einsum('xij,ij->x', v1, dm1[p0:p1])
         shl0, shl1, p0, p1 = aoslices2[ia]
@@ -142,7 +173,7 @@ def grad_pair_int(mol1, mol2, dm1, dm2, charge1, charge2, atmlst):
             v1 = get_jk((mol2, mol2, mol1, mol1),
                         dm1, scripts='ijkl,lk->ij',
                         intor='int2e_ip1', aosym='s2kl', comp=3,
-                        shls_slice=shls_slice)
+                        shls_slice=shls_slice, vhfopt=vhfopt2)
             de[i0] -= 2. * charge1 * charge2 * \
                       numpy.einsum('xij,ij->x', v1, dm2[p0:p1])
     return de
@@ -305,6 +336,8 @@ def grad_hcore_mm(mf_grad, dm=None, mol=None):
 
     coords = mm_mol.atom_coords()
     charges = mm_mol.atom_charges()
+    expnts = mm_mol.get_zetas() + numpy.zeros_like(charges)
+
     g = numpy.zeros_like(coords)
     mf = mf_grad.base
     if dm is None:
@@ -314,34 +347,21 @@ def grad_hcore_mm(mf_grad, dm=None, mol=None):
     for t, comp in mf.components.items():
         mol_comp = comp.mol
         dm_comp = dm[t]
-        if mm_mol.charge_model == 'gaussian':
-            expnts = mm_mol.get_zetas()
 
-            intor = 'int3c2e_ip2'
-            nao = mol_comp.nao
-            max_memory = mol.max_memory - lib.current_memory()[0]
-            blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
-            blksize = max(blksize, 1)
-            cintopt = gto.moleintor.make_cintopt(mol_comp._atm, mol_comp._bas,
-                                                 mol_comp._env, intor)
+        intor = 'int3c2e_ip2'
+        nao = mol_comp.nao
+        max_memory = mol.max_memory - lib.current_memory()[0]
+        blksize = int(min(max_memory*1e6/8/nao**2/3, 200))
+        blksize = max(blksize, 1)
+        cintopt = gto.moleintor.make_cintopt(mol_comp._atm, mol_comp._bas,
+                                             mol_comp._env, intor)
 
-            for i0, i1 in lib.prange(0, charges.size, blksize):
-                fakemol = gto.fakemol_for_charges(coords[i0:i1], expnts[i0:i1])
-                j3c = df.incore.aux_e2(mol_comp, fakemol, intor, aosym='s1',
-                                       comp=3, cintopt=cintopt)
-                g[i0:i1] += numpy.einsum('ipqk,qp->ik', j3c * charges[i0:i1],
-                                         dm_comp).T * comp.charge
-        else:
-            # From examples/qmmm/30-force_on_mm_particles.py
-            # The interaction between electron density and MM particles
-            # d/dR <i| (1/|r-R|) |j> = <i| d/dR (1/|r-R|) |j> = <i| -d/dr (1/|r-R|) |j>
-            #   = <d/dr i| (1/|r-R|) |j> + <i| (1/|r-R|) |d/dr j>
-            for i, q in enumerate(charges):
-                with mol_comp.with_rinv_origin(coords[i]):
-                    v = mol_comp.intor('int1e_iprinv')
-                g[i] += (numpy.einsum('ij,xji->x', dm_comp, v) +
-                         numpy.einsum('ij,xij->x', dm_comp, v.conj())) \
-                        * -q * comp.charge
+        for i0, i1 in lib.prange(0, charges.size, blksize):
+            fakemol = gto.fakemol_for_charges(coords[i0:i1], expnts[i0:i1])
+            j3c = df.incore.aux_e2(mol_comp, fakemol, intor, aosym='s1',
+                                   comp=3, cintopt=cintopt)
+            g[i0:i1] += numpy.einsum('ipqk,qp->ik', j3c * charges[i0:i1],
+                                     dm_comp).T * comp.charge
     return g
 
 def grad_nuc_mm(mf_grad, mol=None):
@@ -357,13 +377,21 @@ def grad_nuc_mm(mf_grad, mol=None):
         return None
     coords = mm_mol.atom_coords()
     charges = mm_mol.atom_charges()
+    if mm_mol.charge_model == 'gaussian':
+        expnts = mm_mol.get_zetas()
+        radii = 1 / numpy.sqrt(expnts)
     g_mm = numpy.zeros_like(coords)
     mol_e = mol.components['e']
     for i in range(mol_e.natm):
         q1 = mol_e.atom_charge(i)
         r1 = mol_e.atom_coord(i)
         r = lib.norm(r1-coords, axis=1)
-        g_mm += q1 * numpy.einsum('i,ix,i->ix', charges, r1-coords, 1/r**3)
+        if mm_mol.charge_model != 'gaussian':
+            coulkern = 1/r**3
+        else:
+            coulkern = erf(r/radii)/r - 2/(numpy.sqrt(numpy.pi)*radii) * numpy.exp(-expnts*r**2)
+            coulkern = coulkern / r**2
+        g_mm += q1 * numpy.einsum('i,ix,i->ix', charges, r1-coords, coulkern)
     return g_mm
 
 def as_scanner(mf_grad):
@@ -464,8 +492,13 @@ class Gradients(rhf_grad.GradientsBase):
         if mol is None: mol = self.mol
         g_qm = self.components['e'].grad_nuc(mol.components['e'], atmlst)
         if mol.mm_mol is not None:
-            coords = mol.mm_mol.atom_coords()
-            charges = mol.mm_mol.atom_charges()
+            mm_mol = mol.mm_mol
+            coords = mm_mol.atom_coords()
+            charges = mm_mol.atom_charges()
+            if mm_mol.charge_model == 'gaussian':
+                expnts = mm_mol.get_zetas()
+                radii = 1 / numpy.sqrt(expnts)
+
             # nuclei lattice interaction
             mol_e = mol.components['e']
             g_mm = numpy.empty((mol_e.natm,3))
@@ -473,12 +506,20 @@ class Gradients(rhf_grad.GradientsBase):
                 q1 = mol_e.atom_charge(i)
                 r1 = mol_e.atom_coord(i)
                 r = lib.norm(r1-coords, axis=1)
-                g_mm[i] = -q1 * numpy.einsum('i,ix,i->x', charges, r1-coords, 1/r**3)
+                if mm_mol.charge_model != 'gaussian':
+                    coulkern = 1/r**3
+                else:
+                    coulkern = erf(r/radii)/r - 2/(numpy.sqrt(numpy.pi)*radii) * numpy.exp(-expnts*r**2)
+                    coulkern = coulkern / r**2
+                g_mm[i] = -q1 * numpy.einsum('i,ix,i->x', charges, r1-coords, coulkern)
             if atmlst is not None:
                 g_mm = g_mm[atmlst]
         else:
             g_mm = 0
         return g_qm + g_mm
+
+    def symmetrize(self, de, atmlst=None):
+        return rhf_grad.symmetrize(self.mol.components['e'], de, atmlst)
 
     def kernel(self, mo_energy=None, mo_coeff=None, mo_occ=None, atmlst=None):
         cput0 = (logger.process_clock(), logger.perf_counter())

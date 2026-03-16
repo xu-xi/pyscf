@@ -5,8 +5,10 @@ Analytic Hessian for constrained nuclear-electronic orbitals
 '''
 
 import numpy
+import ctypes
 from functools import reduce
 from pyscf import gto, lib, neo, scf
+from pyscf.scf import _vhf
 from pyscf.data import nist
 from pyscf.lib import logger
 from pyscf.hessian import rhf as rhf_hessian
@@ -271,6 +273,39 @@ def hess_elec(hessobj, mo_energy=None, mo_coeff=None, mo_occ=None,
     log.timer('CNEO hessian', *time0)
     return de2
 
+def _make_vhfopt(mol, dms, key, vhf_intor):
+    libcvhf = _vhf.libcvhf
+    if not hasattr(libcvhf, vhf_intor):
+        return None
+    vhfopt = _vhf._VHFOpt(mol, 'int2e_'+key, 'CVHF'+key+'_prescreen',
+                          dmcondname=None)
+    ao_loc = mol.ao_loc_nr()
+    nbas = mol.nbas
+    q_cond = numpy.empty((2, nbas, nbas))
+    with mol.with_integral_screen(vhfopt.direct_scf_tol**2):
+        if vhf_intor == 'int2e_ip1ip2':
+            fqcond = libcvhf.CVHFnr_int2e_pp_q_cond
+        elif vhf_intor in ('int2e_ipip1ipip2', 'int2e_ipvip1ipvip2'):
+            fqcond = libcvhf.CVHFnr_int2e_pppp_q_cond
+        else:
+            raise NotImplementedError(vhf_intor)
+        fqcond(
+            getattr(libcvhf, mol._add_suffix(vhf_intor)),
+            lib.c_null_ptr(), q_cond[0].ctypes,
+            ao_loc.ctypes, mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(nbas), mol._env.ctypes)
+        libcvhf.CVHFnr_int2e_q_cond(
+            getattr(libcvhf, mol._add_suffix('int2e')),
+            lib.c_null_ptr(), q_cond[1].ctypes,
+            ao_loc.ctypes, mol._atm.ctypes, ctypes.c_int(mol.natm),
+            mol._bas.ctypes, ctypes.c_int(nbas), mol._env.ctypes)
+    vhfopt.q_cond = q_cond
+
+    vhfopt._dmcondname = 'CVHFnr_dm_cond1'
+    vhfopt.set_dm(dms, mol._atm, mol._bas, mol._env)
+    vhfopt._dmcondname = None
+    return vhfopt
+
 def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
     '''Partial derivative due to inter-type interactions'''
     log = logger.new_logger(hessobj, verbose)
@@ -302,6 +337,16 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
         if interaction.mf2_unrestricted:
             assert dm2.ndim > 2 and dm2.shape[0] == 2
             dm2 = dm2[0] + dm2[1]
+        fakemol1 = mol1 + mol2
+        fakemol2 = mol2 + mol1
+        combined_dm1 = neo.hf._combine_dm(dm1, nao1, dm2, nao2)
+        combined_dm2 = neo.hf._combine_dm(dm2, nao2, dm1, nao1)
+        ipip1_opt1 = _make_vhfopt(fakemol1, combined_dm1, 'ipip1', 'int2e_ipip1ipip2')
+        ipip1_opt2 = _make_vhfopt(fakemol2, combined_dm2, 'ipip1', 'int2e_ipip1ipip2')
+        ipvip1_opt1 = _make_vhfopt(fakemol1, combined_dm1, 'ipvip1', 'int2e_ipvip1ipvip2')
+        ipvip1_opt2 = _make_vhfopt(fakemol2, combined_dm2, 'ipvip1', 'int2e_ipvip1ipvip2')
+        ip1ip2_opt1 = _make_vhfopt(fakemol1, combined_dm1, 'ip1ip2', 'int2e_ip1ip2')
+        ip1ip2_opt2 = _make_vhfopt(fakemol2, combined_dm2, 'ip1ip2', 'int2e_ip1ip2')
         for i0, ia in enumerate(atmlst):
             shl0_1, shl1_1, p0_1, p1_1 = aoslices1[ia]
             shl0_2, shl1_2, p0_2, p1_2 = aoslices2[ia]
@@ -312,7 +357,8 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                 vj1_diag = get_jk((mol1, mol1, mol2, mol2),
                                   comp1.charge * comp2.charge * dm2,
                                   scripts='ijkl,lk->ij', intor='int2e_ipip1',
-                                  aosym='s2kl', comp=9, shls_slice=shls_slice1)
+                                  aosym='s2kl', comp=9, shls_slice=shls_slice1,
+                                  vhfopt=ipip1_opt1)
                 vj1_diag = vj1_diag.reshape(3,3,p1_1-p0_1,nao1)
                 ej[i0, i0] += numpy.einsum('xypq,pq->xy', vj1_diag, dm1[p0_1:p1_1])*2
             # <\nabla^2 mol2 mol2| mol1 mol1>
@@ -320,7 +366,8 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                 vj2_diag = get_jk((mol2, mol2, mol1, mol1),
                                   comp1.charge * comp2.charge * dm1,
                                   scripts='ijkl,lk->ij', intor='int2e_ipip1',
-                                  aosym='s2kl', comp=9, shls_slice=shls_slice2)
+                                  aosym='s2kl', comp=9, shls_slice=shls_slice2,
+                                  vhfopt=ipip1_opt2)
                 vj2_diag = vj2_diag.reshape(3,3,p1_2-p0_2,nao2)
                 ej[i0, i0] += numpy.einsum('xypq,pq->xy', vj2_diag, dm2[p0_2:p1_2])*2
             # <\nabla mol1 \nabla mol1 | mol2 mol2>
@@ -329,7 +376,7 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                              comp1.charge * comp2.charge * dm2,
                              scripts='ijkl,lk->ij', intor='int2e_ipvip1',
                              aosym='s2kl', comp=9,
-                             shls_slice=shls_slice1)
+                             shls_slice=shls_slice1, vhfopt=ipvip1_opt1)
                 vj1 = vj1.reshape(3,3,p1_1-p0_1,nao1)
                 for j0, ja in enumerate(atmlst[:i0+1]):
                     q0, q1 = aoslices1[ja][2:]
@@ -344,7 +391,7 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                              comp1.charge * comp2.charge * dm1,
                              scripts='ijkl,lk->ij', intor='int2e_ipvip1',
                              aosym='s2kl', comp=9,
-                             shls_slice=shls_slice2)
+                             shls_slice=shls_slice2, vhfopt=ipvip1_opt2)
                 vj2 = vj2.reshape(3,3,p1_2-p0_2,nao2)
                 for j0, ja in enumerate(atmlst[:i0+1]):
                     q0, q1 = aoslices2[ja][2:]
@@ -365,7 +412,7 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                                      comp1.charge * comp2.charge * dm2[:,q0:q1],
                                      scripts='ijkl,lk->ij', intor='int2e_ip1ip2',
                                      aosym='s1', comp=9,
-                                     shls_slice=shls_slice)
+                                     shls_slice=shls_slice, vhfopt=ip1ip2_opt1)
                         vj1 = vj1.reshape(3,3,p1_1-p0_1,nao1)
                         ip1ip2 = numpy.einsum('xypq,pq->xy', vj1, dm1[p0_1:p1_1])*4
                         if i0 == j0:
@@ -384,7 +431,7 @@ def partial_hess_int(hessobj, mo_coeff, mo_occ, atmlst=None, verbose=None):
                                      comp1.charge * comp2.charge * dm1[:,q0:q1],
                                      scripts='ijkl,lk->ij', intor='int2e_ip1ip2',
                                      aosym='s1', comp=9,
-                                     shls_slice=shls_slice)
+                                     shls_slice=shls_slice, vhfopt=ip1ip2_opt2)
                         vj2 = vj2.reshape(3,3,p1_2-p0_2,nao2)
                         ej[i0, j0] += numpy.einsum('xypq,pq->xy', vj2, dm2[p0_2:p1_2])*4
 
