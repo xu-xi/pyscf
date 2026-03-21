@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+
+import unittest
+import numpy
+from pyscf import lib, neo
+from pyscf.neo.mp2 import MP2
+from pyscf.neo.mp2_grad import Gradients
+
+
+BOHR = lib.param.BOHR
+STEP = 1e-3
+GRAD_TOL = 3e-5
+
+
+def build_mol(geom, charge, spin, quantum_nuc, basis_e='sto-3g', nuc_basis='pb4d'):
+    mol = neo.Mole()
+    mol.build(atom=geom,
+              unit='Angstrom',
+              basis=basis_e,
+              nuc_basis=nuc_basis,
+              quantum_nuc=quantum_nuc,
+              charge=charge,
+              spin=spin)
+    mol.verbose = 0
+    return mol
+
+
+def build_mp2_ee(mol):
+    mf = neo.CDFT(mol, xc='hf')
+    mf.conv_tol = 1e-10
+    mf.conv_tol_grad = 1e-8
+    mf.verbose = 0
+    mf.kernel()
+
+    mp2ee = MP2(mf, with_ep=False)
+    mp2ee.verbose = 0
+    mp2ee.kernel()
+    return mp2ee
+
+
+def analytic_grad(mp2ee):
+    gobj = Gradients(mp2ee)
+    gobj.verbose = 0
+    return gobj.kernel()
+
+
+def numeric_grad(mp2ee, step=STEP):
+    mol = mp2ee.mol
+    coords = mol.atom_coords(unit='Angstrom')
+    syms = [mol.atom_symbol(i) for i in range(mol.natm)]
+    scanner = mp2ee.as_scanner()
+    g_num = numpy.zeros((mol.natm, 3))
+
+    for ia in range(mol.natm):
+        for comp in range(3):
+            coords_p = coords.copy()
+            coords_m = coords.copy()
+            coords_p[ia, comp] += step
+            coords_m[ia, comp] -= step
+            geom_p = '; '.join(
+                f'{syms[i]} {coords_p[i,0]:.12f} {coords_p[i,1]:.12f} {coords_p[i,2]:.12f}'
+                for i in range(mol.natm)
+            )
+            geom_m = '; '.join(
+                f'{syms[i]} {coords_m[i,0]:.12f} {coords_m[i,1]:.12f} {coords_m[i,2]:.12f}'
+                for i in range(mol.natm)
+            )
+            e_p = scanner(geom_p)
+            e_m = scanner(geom_m)
+            g_num[ia, comp] = (e_p - e_m) / (2 * step) * BOHR
+    return g_num
+
+
+class KnownValues(unittest.TestCase):
+    def check_mp2_grad(self, geom, charge, spin, quantum_nuc,
+                       basis_e='sto-3g', nuc_basis='pb4d',
+                       step=STEP, tol=GRAD_TOL):
+        mol = build_mol(geom, charge, spin, quantum_nuc, basis_e, nuc_basis)
+        mp2ee = build_mp2_ee(mol)
+        g_ana = analytic_grad(mp2ee)
+        g_num = numeric_grad(mp2ee, step=step)
+        diff = g_ana - g_num
+
+        self.assertLess(numpy.max(numpy.abs(diff)), tol)
+
+    def test_grad_h2o(self):
+        self.check_mp2_grad(
+            geom='O 0.000000 0.000000 0.000000; '
+                 'H 0.000000 -0.757000 0.587000; '
+                 'H 0.000000 0.757000 0.587000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[1, 2],
+        )
+
+    def test_grad_fhf(self):
+        self.check_mp2_grad(
+            geom='F 0.000000 0.000000 -1.000000; '
+                 'H 0.000000 0.000000 0.000000; '
+                 'F 0.000000 0.000000 1.000000',
+            charge=-1,
+            spin=0,
+            quantum_nuc=[1],
+        )
+
+    def test_grad_hf(self):
+        self.check_mp2_grad(
+            geom='H 0.000000 0.000000 0.000000; F 0.000000 0.000000 0.900000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+        )
+
+
+if __name__ == '__main__':
+    print('Full Tests for neo.mp2')
+    unittest.main()
