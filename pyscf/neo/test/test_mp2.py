@@ -111,6 +111,29 @@ class KnownValues(unittest.TestCase):
             quantum_nuc=[0],
         )
 
+    def test_reset_recomputes_reference(self):
+        mol0 = build_mol(
+            geom='H 0.000000 0.000000 -0.018267995234; '
+                 'F 0.000000 0.000000 0.917738818023',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+        )
+        coords = mol0.atom_coords()
+        coords[0, 0] += 1e-3  # Bohr
+        mol1 = mol0.set_geom_(coords, unit='Bohr', inplace=False)
+
+        mp2_fresh = build_mp2_ee(mol1)
+        g_fresh = analytic_grad(mp2_fresh)
+
+        mp2_reuse = build_mp2_ee(mol0)
+        mp2_reuse.reset(mol1)
+        mp2_reuse.kernel()
+        g_reuse = analytic_grad(mp2_reuse)
+
+        self.assertAlmostEqual(mp2_reuse.e_tot, mp2_fresh.e_tot, places=10)
+        self.assertLess(numpy.max(numpy.abs(g_reuse - g_fresh)), 1e-8)
+
 
 if __name__ == '__main__':
     print('Full Tests for neo.mp2')

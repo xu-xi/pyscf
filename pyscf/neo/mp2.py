@@ -127,7 +127,18 @@ class MP2(lib.StreamObject):
         if mol is not None:
             self.mol = mol
         self.base.reset(mol)
+        # A reset changes the geometry. Force the CNEO reference to be
+        # recomputed on the next kernel call instead of reusing stale
+        # converged orbitals/energies from the previous geometry.
+        self.base.converged = False
+        for comp in self.base.components.values():
+            comp.converged = False
         self.mp_e = None
+        self.e_hf = None
+        self.e_corr = None
+        self.e_corr_ee = None
+        self.e_corr_ep = None
+        self.e_tot = None
         self.t2 = None
         self.t2_ep = None
         return self
