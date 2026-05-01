@@ -10,6 +10,7 @@ from pyscf.mp import mp2
 from pyscf.lib import logger
 from pyscf.ao2mo import _ao2mo
 from pyscf.grad.mp2 import _index_frozen_active, has_frozen_orbitals, _shell_prange
+from .mp2_grad_slow import ee_corr_grad
 
 
 def _mo1_to_dm1(mo1, mo_occ):
@@ -119,14 +120,20 @@ class Gradients(neo_grad.Gradients):
             raise AttributeError('MP2 object lacks _scf or base attribute required for gradients')
         super().__init__(mf)
         self.base = mp
+        self.mp2_grad_slow = getattr(mp, 'mp2_grad_slow', True)
+        self._keys = self._keys.union(['mp2_grad_slow'])
 
     def kernel(self, t2=None, atmlst=None, verbose=None):
         log = logger.new_logger(self, verbose)
         mf = getattr(self.base, '_scf', None)
         if mf is None:
             mf = self.base.base
-        
+
         cput0 = (logger.process_clock(), logger.perf_counter())
+
+        if self.base.with_ep:
+            raise NotImplementedError('CNEO-MP2 gradients are not supported yet; '
+                                      'only CNEO-MP2(ee) gradients are available')
 
         if t2 is None:
             if getattr(self.base, 't2', None) is None:
@@ -135,6 +142,8 @@ class Gradients(neo_grad.Gradients):
 
         if atmlst is None:
             atmlst = self.atmlst
+            if atmlst is None:
+                atmlst = range(self.mol.natm)
         else:
             self.atmlst = atmlst
 
@@ -147,6 +156,21 @@ class Gradients(neo_grad.Gradients):
         if mp_e is None:
             mp_e = self.base.mp
         mol_e = mp_e.mol
+
+        if self.mp2_grad_slow:
+            mf_grad = mf.nuc_grad_method()
+            mf_grad.verbose = self.verbose
+            de_hf = mf_grad.kernel(atmlst=atmlst)
+            de_corr = ee_corr_grad(self, mf, mp_e, t2, atmlst, verbose=log)
+            de = de_hf + de_corr
+            if self.mol.symmetry:
+                de = self.symmetrize(de, atmlst)
+            self._de_hf = de_hf
+            self._de_corr_ee = de_corr
+            self.de = de
+            self._finalize()
+            log.timer('%s gradients' % self.base.__class__.__name__, *cput0)
+            return self.de
 
         # ===== 1) MP2 1- and 2-pdm intermediates for electrons =====
         d1 = mp2._gamma1_intermediates(mp_e, t2)

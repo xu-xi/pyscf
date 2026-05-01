@@ -4,12 +4,11 @@ import unittest
 import numpy
 from pyscf import lib, neo
 from pyscf.neo.mp2 import MP2
-from pyscf.neo.mp2_grad import Gradients
 
 
 BOHR = lib.param.BOHR
 STEP = 1e-3
-GRAD_TOL = 3e-5
+GRAD_TOL = 1e-5
 
 
 def build_mol(geom, charge, spin, quantum_nuc, basis_e='sto-3g', nuc_basis='pb4d'):
@@ -25,21 +24,21 @@ def build_mol(geom, charge, spin, quantum_nuc, basis_e='sto-3g', nuc_basis='pb4d
     return mol
 
 
-def build_mp2_ee(mol):
+def build_mp2(mol, mp2_grad_slow=True):
     mf = neo.CDFT(mol, xc='hf')
     mf.conv_tol = 1e-10
     mf.conv_tol_grad = 1e-8
     mf.verbose = 0
     mf.kernel()
 
-    mp2ee = MP2(mf, with_ep=False)
-    mp2ee.verbose = 0
-    mp2ee.kernel()
-    return mp2ee
+    mp2obj = MP2(mf, mp2_grad_slow=mp2_grad_slow)
+    mp2obj.verbose = 0
+    mp2obj.kernel()
+    return mp2obj
 
 
 def analytic_grad(mp2ee):
-    gobj = Gradients(mp2ee)
+    gobj = mp2ee.nuc_grad_method()
     gobj.verbose = 0
     return gobj.kernel()
 
@@ -73,12 +72,12 @@ def numeric_grad(mp2ee, step=STEP):
 
 class KnownValues(unittest.TestCase):
     def check_mp2_grad(self, geom, charge, spin, quantum_nuc,
-                       basis_e='sto-3g', nuc_basis='pb4d',
-                       step=STEP, tol=GRAD_TOL):
+                       basis_e='ccpvdz', nuc_basis='pb4d',
+                       mp2_grad_slow=True, step=STEP, tol=GRAD_TOL):
         mol = build_mol(geom, charge, spin, quantum_nuc, basis_e, nuc_basis)
-        mp2ee = build_mp2_ee(mol)
-        g_ana = analytic_grad(mp2ee)
-        g_num = numeric_grad(mp2ee, step=step)
+        mp2obj = build_mp2(mol, mp2_grad_slow=mp2_grad_slow)
+        g_ana = analytic_grad(mp2obj)
+        g_num = numeric_grad(mp2obj, step=step)
         diff = g_ana - g_num
 
         self.assertLess(numpy.max(numpy.abs(diff)), tol)
@@ -111,6 +110,16 @@ class KnownValues(unittest.TestCase):
             quantum_nuc=[0],
         )
 
+    def test_grad_hf_z_vector(self):
+        self.check_mp2_grad(
+            geom='H 0.000000 0.000000 0.000000; F 0.000000 0.000000 0.900000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+            mp2_grad_slow=False,
+            tol=1e-4,
+        )
+
     def test_reset_recomputes_reference(self):
         mol0 = build_mol(
             geom='H 0.000000 0.000000 -0.018267995234; '
@@ -123,10 +132,10 @@ class KnownValues(unittest.TestCase):
         coords[0, 0] += 1e-3  # Bohr
         mol1 = mol0.set_geom_(coords, unit='Bohr', inplace=False)
 
-        mp2_fresh = build_mp2_ee(mol1)
+        mp2_fresh = build_mp2(mol1)
         g_fresh = analytic_grad(mp2_fresh)
 
-        mp2_reuse = build_mp2_ee(mol0)
+        mp2_reuse = build_mp2(mol0)
         mp2_reuse.reset(mol1)
         mp2_reuse.kernel()
         g_reuse = analytic_grad(mp2_reuse)

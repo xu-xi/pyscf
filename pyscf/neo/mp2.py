@@ -85,12 +85,16 @@ class MP2(lib.StreamObject):
     with_ep : bool
         If True, include explicit electron-proton correlation (CNEO-MP2).
         If False, compute the simplified CNEO-MP2(ee).
+    mp2_grad_slow : bool
+        If True, use the slow direct CNEO-CPHF implementation for
+        CNEO-MP2(ee) gradients. If False, use the original Z-vector
+        CNEO-MP2(ee) gradient implementation.
     """
     _keys = {'base', 'mol', 'verbose', 'stdout', 'max_memory',
              'with_ep', 'mp_e', 'e_hf', 'e_corr', 'e_tot', 't2',
-             'e_corr_ee', 'e_corr_ep', 't2_ep'}
+             'e_corr_ee', 'e_corr_ep', 't2_ep', 'mp2_grad_slow'}
 
-    def __init__(self, mf, with_ep=False):
+    def __init__(self, mf, with_ep=False, mp2_grad_slow=True):
         if not hasattr(mf, 'components') or 'e' not in mf.components:
             raise TypeError('CNEO-MP2 requires a (C)NEO reference object.')
 
@@ -100,6 +104,7 @@ class MP2(lib.StreamObject):
         self.stdout = self.mol.stdout
         self.max_memory = mf.max_memory
         self.with_ep = bool(with_ep)
+        self.mp2_grad_slow = bool(mp2_grad_slow)
 
         if isinstance(mf.components['e'], scf.uhf.UHF):
             raise NotImplementedError('CNEO-MP2 currently supports RHF electron reference only')
@@ -179,8 +184,11 @@ class MP2(lib.StreamObject):
     as_scanner = as_scanner
 
     def nuc_grad_method(self):
-        from pyscf.neo import grad_mp2
-        return grad_mp2.Gradients(self)
+        if self.with_ep:
+            raise NotImplementedError('CNEO-MP2 gradients are not supported yet; '
+                                      'only CNEO-MP2(ee) gradients are available')
+        from pyscf.neo import mp2_grad
+        return mp2_grad.Gradients(self)
 
     @staticmethod
     def _ep_ovov(mol_e, mol_n, ce, cn, occidx_e, viridx_e, occidx_n, viridx_n):
