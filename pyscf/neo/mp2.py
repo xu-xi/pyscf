@@ -184,9 +184,6 @@ class MP2(lib.StreamObject):
     as_scanner = as_scanner
 
     def nuc_grad_method(self):
-        if self.with_ep:
-            raise NotImplementedError('CNEO-MP2 gradients are not supported yet; '
-                                      'only CNEO-MP2(ee) gradients are available')
         from pyscf.neo import mp2_grad
         return mp2_grad.Gradients(self)
 

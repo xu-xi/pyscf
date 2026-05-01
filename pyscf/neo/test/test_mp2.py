@@ -24,14 +24,14 @@ def build_mol(geom, charge, spin, quantum_nuc, basis_e='sto-3g', nuc_basis='pb4d
     return mol
 
 
-def build_mp2(mol, mp2_grad_slow=True):
+def build_mp2(mol, with_ep=False, mp2_grad_slow=True):
     mf = neo.CDFT(mol, xc='hf')
     mf.conv_tol = 1e-10
     mf.conv_tol_grad = 1e-8
     mf.verbose = 0
     mf.kernel()
 
-    mp2obj = MP2(mf, mp2_grad_slow=mp2_grad_slow)
+    mp2obj = MP2(mf, with_ep=with_ep, mp2_grad_slow=mp2_grad_slow)
     mp2obj.verbose = 0
     mp2obj.kernel()
     return mp2obj
@@ -73,9 +73,10 @@ def numeric_grad(mp2ee, step=STEP):
 class KnownValues(unittest.TestCase):
     def check_mp2_grad(self, geom, charge, spin, quantum_nuc,
                        basis_e='ccpvdz', nuc_basis='pb4d',
-                       mp2_grad_slow=True, step=STEP, tol=GRAD_TOL):
+                       with_ep=False, mp2_grad_slow=True,
+                       step=STEP, tol=GRAD_TOL):
         mol = build_mol(geom, charge, spin, quantum_nuc, basis_e, nuc_basis)
-        mp2obj = build_mp2(mol, mp2_grad_slow=mp2_grad_slow)
+        mp2obj = build_mp2(mol, with_ep=with_ep, mp2_grad_slow=mp2_grad_slow)
         g_ana = analytic_grad(mp2obj)
         g_num = numeric_grad(mp2obj, step=step)
         diff = g_ana - g_num
@@ -118,6 +119,37 @@ class KnownValues(unittest.TestCase):
             quantum_nuc=[0],
             mp2_grad_slow=False,
             tol=1e-4,
+        )
+
+    def test_grad_hf_full_ep(self):
+        self.check_mp2_grad(
+            geom='H 0.000000 0.000000 0.000000; F 0.000000 0.000000 0.900000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+            with_ep=True,
+        )
+
+    def test_grad_h2o_full_ep(self):
+        self.check_mp2_grad(
+            geom='O 0.000000 0.000000 0.000000; '
+                 'H 0.000000 -0.757000 0.587000; '
+                 'H 0.000000 0.757000 0.587000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[1, 2],
+            with_ep=True,
+        )
+
+    def test_grad_hcn_full_ep(self):
+        self.check_mp2_grad(
+            geom='H 0.000000 0.000000 0.000000; '
+                 'C 0.000000 0.000000 1.064000; '
+                 'N 0.000000 0.000000 2.220000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+            with_ep=True,
         )
 
     def test_reset_recomputes_reference(self):

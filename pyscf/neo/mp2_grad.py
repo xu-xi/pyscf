@@ -10,7 +10,7 @@ from pyscf.mp import mp2
 from pyscf.lib import logger
 from pyscf.ao2mo import _ao2mo
 from pyscf.grad.mp2 import _index_frozen_active, has_frozen_orbitals, _shell_prange
-from .mp2_grad_slow import ee_corr_grad
+from .mp2_grad_slow import ee_corr_grad, ep_corr_grad
 
 
 def _mo1_to_dm1(mo1, mo_occ):
@@ -131,13 +131,16 @@ class Gradients(neo_grad.Gradients):
 
         cput0 = (logger.process_clock(), logger.perf_counter())
 
-        if self.base.with_ep:
+        if self.base.with_ep and not self.mp2_grad_slow:
             raise NotImplementedError('CNEO-MP2 gradients are not supported yet; '
-                                      'only CNEO-MP2(ee) gradients are available')
+                                      'only the slow CNEO-CPHF implementation is available')
 
         if t2 is None:
             if getattr(self.base, 't2', None) is None:
                 self.base.kernel()
+            t2 = self.base.t2
+        if self.base.with_ep and getattr(self.base, 't2_ep', None) is None:
+            self.base.kernel()
             t2 = self.base.t2
 
         if atmlst is None:
@@ -161,12 +164,19 @@ class Gradients(neo_grad.Gradients):
             mf_grad = mf.nuc_grad_method()
             mf_grad.verbose = self.verbose
             de_hf = mf_grad.kernel(atmlst=atmlst)
-            de_corr = ee_corr_grad(self, mf, mp_e, t2, atmlst, verbose=log)
+            de_corr_ee = ee_corr_grad(self, mf, mp_e, t2, atmlst, verbose=log)
+            de_corr = de_corr_ee
+            if self.base.with_ep:
+                de_corr_ep = ep_corr_grad(self, mf, mp_e, self.base.t2_ep,
+                                          atmlst, verbose=log)
+                de_corr = de_corr + de_corr_ep
+                self._de_corr_ep = de_corr_ep
             de = de_hf + de_corr
             if self.mol.symmetry:
                 de = self.symmetrize(de, atmlst)
             self._de_hf = de_hf
-            self._de_corr_ee = de_corr
+            self._de_corr_ee = de_corr_ee
+            self._de_corr = de_corr
             self.de = de
             self._finalize()
             log.timer('%s gradients' % self.base.__class__.__name__, *cput0)
