@@ -24,7 +24,7 @@ def build_mol(geom, charge, spin, quantum_nuc, basis_e='sto-3g', nuc_basis='pb4d
     return mol
 
 
-def build_mp2(mol, with_ep=False, mp2_grad_slow=True):
+def build_mp2(mol, with_ep=False, mp2_grad_slow=False):
     mf = neo.CDFT(mol, xc='hf')
     mf.conv_tol = 1e-10
     mf.conv_tol_grad = 1e-8
@@ -73,7 +73,7 @@ def numeric_grad(mp2ee, step=STEP):
 class KnownValues(unittest.TestCase):
     def check_mp2_grad(self, geom, charge, spin, quantum_nuc,
                        basis_e='ccpvdz', nuc_basis='pb4d',
-                       with_ep=False, mp2_grad_slow=True,
+                       with_ep=False, mp2_grad_slow=False,
                        step=STEP, tol=GRAD_TOL):
         mol = build_mol(geom, charge, spin, quantum_nuc, basis_e, nuc_basis)
         mp2obj = build_mp2(mol, with_ep=with_ep, mp2_grad_slow=mp2_grad_slow)
@@ -118,7 +118,6 @@ class KnownValues(unittest.TestCase):
             spin=0,
             quantum_nuc=[0],
             mp2_grad_slow=False,
-            tol=1e-4,
         )
 
     def test_grad_hf_full_ep(self):
@@ -128,6 +127,28 @@ class KnownValues(unittest.TestCase):
             spin=0,
             quantum_nuc=[0],
             with_ep=True,
+        )
+
+    def test_grad_hf_full_ep_z_vector(self):
+        self.check_mp2_grad(
+            geom='H 0.000000 0.000000 0.000000; F 0.000000 0.000000 0.900000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[0],
+            with_ep=True,
+            mp2_grad_slow=False,
+        )
+
+    def test_grad_h2o_full_ep_z_vector(self):
+        self.check_mp2_grad(
+            geom='O 0.000000 0.000000 0.000000; '
+                 'H 0.000000 -0.757000 0.587000; '
+                 'H 0.000000 0.757000 0.587000',
+            charge=0,
+            spin=0,
+            quantum_nuc=[1, 2],
+            with_ep=True,
+            mp2_grad_slow=False,
         )
 
     def test_grad_h2o_full_ep(self):

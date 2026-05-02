@@ -16,7 +16,7 @@ CNEO-MP2 and CNEO-MP2(ee).
 
 CNEO-MP2(ee) adds only the electron-electron MP2 correction on top of the
 converged (C)NEO-HF reference. The full CNEO-MP2 additionally
-includes explicit electron-proton dynamic correlation.
+includes electron-proton dynamic correlation.
 """
 
 import numpy
@@ -87,14 +87,15 @@ class MP2(lib.StreamObject):
         If False, compute the simplified CNEO-MP2(ee).
     mp2_grad_slow : bool
         If True, use the slow direct CNEO-CPHF implementation for
-        CNEO-MP2(ee) gradients. If False, use the original Z-vector
-        CNEO-MP2(ee) gradient implementation.
+        gradients. If False, use the Z-vector gradient implementation for
+        CNEO-MP2(ee), and for full CNEO-MP2 when there are no frozen
+        electronic orbitals. The default is False.
     """
     _keys = {'base', 'mol', 'verbose', 'stdout', 'max_memory',
              'with_ep', 'mp_e', 'e_hf', 'e_corr', 'e_tot', 't2',
              'e_corr_ee', 'e_corr_ep', 't2_ep', 'mp2_grad_slow'}
 
-    def __init__(self, mf, with_ep=False, mp2_grad_slow=True):
+    def __init__(self, mf, with_ep=False, mp2_grad_slow=False):
         if not hasattr(mf, 'components') or 'e' not in mf.components:
             raise TypeError('CNEO-MP2 requires a (C)NEO reference object.')
 
