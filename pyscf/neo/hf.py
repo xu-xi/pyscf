@@ -580,6 +580,65 @@ def _combine_dm(dm1, nao1, dm2, nao2):
             dms[:, nao1:, nao1:] = dm2
     return dms
 
+
+def _dm_nset(dm):
+    if dm is None:
+        return 0
+    dm = numpy.asarray(dm)
+    if dm.ndim == 2:
+        return 1
+    return dm.shape[0]
+
+
+def _select_dm(dm, idx):
+    if dm is None:
+        return None
+    dm = numpy.asarray(dm)
+    if dm.ndim == 2:
+        return dm
+    return dm[idx]
+
+
+def _direct_cross_jk(mol1, mol2, dm1, dm2, vhfopt):
+    n1 = _dm_nset(dm1)
+    n2 = _dm_nset(dm2)
+    if n1 > 1 and n2 > 1 and n1 != n2:
+        raise ValueError(f'dm1 has nset={n1} but dm2 has nset={n2}')
+    nset = max(n1, n2, 1)
+    batched = nset > 1
+
+    if not batched:
+        if dm1 is not None and dm2 is not None:
+            return scf.jk.get_jk((mol1, mol1, mol2, mol2),
+                                 (dm2, dm1),
+                                 scripts=('ijkl,lk->ij', 'ijkl,ji->kl'),
+                                 intor='int2e', aosym='s4',
+                                 vhfopt=vhfopt)
+        if dm1 is not None:
+            return None, scf.jk.get_jk((mol1, mol1, mol2, mol2),
+                                       dm1,
+                                       scripts='ijkl,ji->kl',
+                                       intor='int2e', aosym='s4',
+                                       vhfopt=vhfopt)
+        return scf.jk.get_jk((mol1, mol1, mol2, mol2),
+                             dm2,
+                             scripts='ijkl,lk->ij',
+                             intor='int2e', aosym='s4',
+                             vhfopt=vhfopt), None
+
+    v1 = []
+    v2 = []
+    for i in range(nset):
+        ji, jk = _direct_cross_jk(mol1, mol2, _select_dm(dm1, i),
+                                  _select_dm(dm2, i), vhfopt)
+        if ji is not None:
+            v1.append(ji)
+        if jk is not None:
+            v2.append(jk)
+    return ((numpy.asarray(v1) if v1 else None),
+            (numpy.asarray(v2) if v2 else None))
+
+
 class InteractionCoulomb:
     '''Inter-component Coulomb interactions'''
     def __init__(self, mf1_type, mf1, mf2_type, mf2, max_memory, direct_scf_tol):
@@ -660,27 +719,11 @@ class InteractionCoulomb:
             if self._vhfopt is None:
                 self._vhfopt = self._init_vhfopt()
             self._vhfopt_set_dm(dm1, dm2)
-            if dm1 is not None and dm2 is not None:
-                vj[self.mf1_type], vj[self.mf2_type] = \
-                        scf.jk.get_jk((mol1, mol1, mol2, mol2),
-                                      (dm2, dm1),
-                                      scripts=('ijkl,lk->ij', 'ijkl,ji->kl'),
-                                      intor='int2e', aosym='s4',
-                                      vhfopt=self._vhfopt)
-            elif dm1 is not None:
-                vj[self.mf2_type] = \
-                        scf.jk.get_jk((mol1, mol1, mol2, mol2),
-                                      dm1,
-                                      scripts='ijkl,ji->kl',
-                                      intor='int2e', aosym='s4',
-                                      vhfopt=self._vhfopt)
-            else:
-                vj[self.mf1_type] = \
-                        scf.jk.get_jk((mol1, mol1, mol2, mol2),
-                                      dm2,
-                                      scripts='ijkl,lk->ij',
-                                      intor='int2e', aosym='s4',
-                                      vhfopt=self._vhfopt)
+            v1, v2 = _direct_cross_jk(mol1, mol2, dm1, dm2, self._vhfopt)
+            if v1 is not None:
+                vj[self.mf1_type] = v1
+            if v2 is not None:
+                vj[self.mf2_type] = v2
         charge_product = self.mf1.charge * self.mf2.charge
         if self.mf1_type in vj:
             vj[self.mf1_type] *= charge_product

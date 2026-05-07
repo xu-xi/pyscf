@@ -260,10 +260,16 @@ def _shell_prange(mol, start, stop, blksize):
     for ib, now in zip(range(start, stop), dims):
         nao += now
         if nao > blksize:
-            yield (ib0, ib, nao-now)
-            ib0 = ib
-            nao = now
-    yield (ib0, stop, nao)
+            if ib > ib0:
+                yield (ib0, ib, nao-now)
+                ib0 = ib
+                nao = now
+            else:
+                yield (ib, ib+1, now)
+                ib0 = ib + 1
+                nao = 0
+    if ib0 < stop:
+        yield (ib0, stop, nao)
 
 def _response_dm1(mp, Xvo):
     nvir, nocc = Xvo.shape

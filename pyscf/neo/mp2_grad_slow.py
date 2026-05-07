@@ -7,6 +7,7 @@ from pyscf import ao2mo, lib
 from pyscf.grad.mp2 import has_frozen_orbitals
 from pyscf.lib import logger
 from . import cphf, hessian
+from .mp2 import _ep_ao_eri, _ep_ovov_from_ao
 
 
 def _get_hessian_object(mf):
@@ -198,16 +199,47 @@ def _embed_coeff(coeff, nao_tot, p0):
 
 
 def _ep_eri_mo(mol_e, mol_n, mo_coeff_e, mo_coeff_n):
-    nao_e = mol_e.nao_nr()
-    nao_n = mol_n.nao_nr()
-    nao_tot = nao_e + nao_n
-    ce = _embed_coeff(mo_coeff_e, nao_tot, 0)
-    cn = _embed_coeff(mo_coeff_n, nao_tot, nao_e)
-    eri = (mol_e + mol_n).intor('int2e', aosym='s4')
-    return ao2mo.incore.general(eri, (ce, ce, cn, cn),
-                                compact=False).reshape(
-                                    mo_coeff_e.shape[1], mo_coeff_e.shape[1],
-                                    mo_coeff_n.shape[1], mo_coeff_n.shape[1])
+    eri = _ep_ao_eri(mol_e, mol_n)
+    return _ep_ovov_from_ao(eri, mo_coeff_e, mo_coeff_e,
+                            mo_coeff_n, mo_coeff_n)
+
+
+def _ao_eri_deriv_ep_ovov_cross(mol_e, mol_n, coe, cve, con, cvn,
+                                ia, charge_product):
+    nocc_e = coe.shape[1]
+    nvir_e = cve.shape[1]
+    nocc_n = con.shape[1]
+    nvir_n = cvn.shape[1]
+    dovov = numpy.zeros((3, nocc_e, nvir_e, nocc_n, nvir_n),
+                        dtype=numpy.result_type(coe, con))
+
+    mol_tot = mol_e + mol_n
+    nbas_e = mol_e.nbas
+    nbas_tot = mol_tot.nbas
+
+    sh0e, sh1e, p0e, p1e = mol_e.offset_nr_by_atom()[ia]
+    if sh1e > sh0e:
+        eri1e = _ep_ao_eri(
+            mol_e, mol_n, intor='int2e_ip1', comp=3,
+            shls_slice=(sh0e, sh1e, 0, nbas_e,
+                        nbas_e, nbas_tot, nbas_e, nbas_tot))
+        d_i = _ep_ovov_from_ao(eri1e, coe[p0e:p1e], cve, con, cvn)
+        d_a = _ep_ovov_from_ao(eri1e, cve[p0e:p1e], coe, con, cvn)
+        dovov += d_i
+        dovov += d_a.transpose(0, 2, 1, 3, 4)
+
+    sh0n, sh1n, p0n, p1n = mol_n.offset_nr_by_atom()[ia]
+    if sh1n > sh0n:
+        eri1n = _ep_ao_eri(
+            mol_e, mol_n, intor='int2e_ip1', comp=3,
+            shls_slice=(nbas_e + sh0n, nbas_e + sh1n,
+                        nbas_e, nbas_tot, 0, nbas_e, 0, nbas_e))
+        d_i = _ep_ovov_from_ao(eri1n, con[p0n:p1n], cvn, coe, cve)
+        d_a = _ep_ovov_from_ao(eri1n, cvn[p0n:p1n], con, coe, cve)
+        dovov += d_i.transpose(0, 3, 4, 1, 2)
+        dovov += d_a.transpose(0, 3, 4, 2, 1)
+
+    return -charge_product * dovov
 
 
 def _ao_eri_deriv_ep_ovov(eri1, coe, cve, con, cvn,
@@ -358,8 +390,6 @@ def ep_corr_grad(mp_grad, mf, mp_e, t2_ep, atmlst, verbose=None):
         return numpy.zeros((len(atmlst), 3))
 
     de = numpy.zeros((len(atmlst), 3), dtype=numpy.result_type(ce))
-    nao_e = mol_e.nao_nr()
-
     for t, comp_n in mf.components.items():
         if not t.startswith('n') or t not in t2_ep:
             continue
@@ -380,23 +410,14 @@ def ep_corr_grad(mp_grad, mf, mp_e, t2_ep, atmlst, verbose=None):
         charge_product = comp_e.charge * comp_n.charge
         eri_mo = _ep_eri_mo(mol_e, comp_n.mol, ce, cn) * charge_product
 
-        mol_tot = mol_e + comp_n.mol
-        nao_tot = mol_tot.nao_nr()
-        coe = _embed_coeff(ce[:, occidx_e], nao_tot, 0)
-        cve = _embed_coeff(ce[:, viridx_e], nao_tot, 0)
-        con = _embed_coeff(cn[:, occidx_n], nao_tot, nao_e)
-        cvn = _embed_coeff(cn[:, viridx_n], nao_tot, nao_e)
-        eri1 = mol_tot.intor('int2e_ip1', comp=3, aosym='s1')
-        eri1 = eri1.reshape(3, nao_tot, nao_tot, nao_tot, nao_tot)
-
-        offset_e = mol_e.offset_nr_by_atom()
-        offset_n = comp_n.mol.offset_nr_by_atom()
+        coe = ce[:, occidx_e]
+        cve = ce[:, viridx_e]
+        con = cn[:, occidx_n]
+        cvn = cn[:, viridx_n]
 
         for k, ia in enumerate(atmlst):
-            p0e, p1e = offset_e[ia][2:]
-            p0n, p1n = offset_n[ia][2:]
-            p0n += nao_e
-            p1n += nao_e
+            dg_bare = _ao_eri_deriv_ep_ovov_cross(
+                mol_e, comp_n.mol, coe, cve, con, cvn, ia, charge_product)
             for x in range(3):
                 iset = k * 3 + x
                 qe = q_mo['e'][ia][x]
@@ -408,9 +429,7 @@ def ep_corr_grad(mp_grad, mf, mp_e, t2_ep, atmlst, verbose=None):
                                                  s1_mo[t][ia][x],
                                                  eps_n, nocc_n)
 
-                dg = _ao_eri_deriv_ep_ovov(eri1[x], coe, cve, con, cvn,
-                                           p0e, p1e, p0n, p1n,
-                                           charge_product)
+                dg = dg_bare[x]
                 dg += _ep_ovov_rotation_deriv(eri_mo, ue, up,
                                               nocc_e, nocc_n)
 

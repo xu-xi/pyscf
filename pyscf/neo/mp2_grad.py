@@ -4,17 +4,313 @@
 import numpy
 from functools import reduce
 from pyscf import lib, ao2mo
+from pyscf.ao2mo import _ao2mo
 from . import hessian, grad as neo_grad
 from pyscf.lib import logger
-from pyscf.grad.mp2 import has_frozen_orbitals
-from .mp2_grad_slow import (ee_corr_grad, ep_corr_grad, _ao_eri_deriv_ovov,
-                            _eri_ovov_rotation_deriv, _ep_eri_mo,
-                            _ao_eri_deriv_ep_ovov, _ep_ovov_rotation_deriv,
-                            _embed_coeff, _fill_canonical_mo_response)
+from pyscf.grad.mp2 import has_frozen_orbitals, _shell_prange
+from .mp2 import _ep_ao_eri, _ep_ovov_from_ao
+from .mp2_grad_slow import (ee_corr_grad, ep_corr_grad,
+                            _ao_eri_deriv_ep_ovov_cross,
+                            _fill_canonical_mo_response)
 
 
 def _mo_density(mo_coeff, dm1mo):
     return reduce(numpy.dot, (mo_coeff, dm1mo, mo_coeff.T))
+
+
+def _ao2mo_block(mol, coeffs):
+    shape = tuple(c.shape[1] for c in coeffs)
+    return ao2mo.general(mol, coeffs, compact=False).reshape(shape)
+
+
+def _block_size(max_mb, *dims):
+    bytes_per_item = numpy.dtype(float).itemsize
+    denom = bytes_per_item
+    for n in dims:
+        denom *= max(int(n), 1)
+    return max(1, int(max_mb * 1e6 // denom))
+
+
+class _EEMOBlocks:
+    def __init__(self, mol, mo_coeff, nocc, max_block_mb=256):
+        self.mol = mol
+        self.mo_coeff = mo_coeff
+        self.nocc = nocc
+        self.nmo = mo_coeff.shape[1]
+        self.nvir = self.nmo - nocc
+        self.co = mo_coeff[:, :nocc]
+        self.cv = mo_coeff[:, nocc:]
+        self.max_block_mb = max_block_mb
+        self._ovov = None
+        self._ooov = None
+
+    @property
+    def ovov(self):
+        if self._ovov is None:
+            self._ovov = _ao2mo_block(self.mol,
+                                      (self.co, self.cv, self.co, self.cv))
+        return self._ovov
+
+    @property
+    def ooov(self):
+        if self._ooov is None:
+            self._ooov = _ao2mo_block(self.mol,
+                                      (self.co, self.co, self.co, self.cv))
+        return self._ooov
+
+    def vvov_chunk_size(self):
+        return _block_size(self.max_block_mb, self.nvir,
+                           self.nocc, self.nvir)
+
+    def ovvv_chunk_size(self):
+        return _block_size(self.max_block_mb, self.nocc,
+                           self.nvir, self.nvir)
+
+    def vvov_chunk(self, p0, p1):
+        return _ao2mo_block(self.mol, (self.cv[:, p0:p1], self.cv,
+                                      self.co, self.cv))
+
+    def ovvv_chunk(self, p0, p1):
+        return _ao2mo_block(self.mol, (self.co, self.cv,
+                                      self.cv[:, p0:p1], self.cv))
+
+
+class _EPMOBlocks:
+    def __init__(self, mol_e, mol_p, ce, cp, occ_e, vir_e, occ_p, vir_p,
+                 charge_product):
+        self.mol_e = mol_e
+        self.mol_p = mol_p
+        self.ce = ce
+        self.cp = cp
+        self.occ_e = occ_e
+        self.vir_e = vir_e
+        self.occ_p = occ_p
+        self.vir_p = vir_p
+        self.charge_product = charge_product
+        self.coe = ce[:, occ_e]
+        self.cve = ce[:, vir_e]
+        self.cop = cp[:, occ_p]
+        self.cvp = cp[:, vir_p]
+        self.nocc_e = self.coe.shape[1]
+        self.nvir_e = self.cve.shape[1]
+        self.nocc_p = self.cop.shape[1]
+        self.nvir_p = self.cvp.shape[1]
+        self._eri_ao = None
+        self._paIA = None
+        self._ipIA = None
+        self._iaPA = None
+        self._iaIP = None
+
+    @property
+    def eri_ao(self):
+        if self._eri_ao is None:
+            self._eri_ao = _ep_ao_eri(self.mol_e, self.mol_p)
+        return self._eri_ao
+
+    def _transform(self, coeffs):
+        return (_ep_ovov_from_ao(self.eri_ao, *coeffs) *
+                self.charge_product)
+
+    @property
+    def paIA(self):
+        if self._paIA is None:
+            self._paIA = self._transform((self.ce, self.cve,
+                                          self.cop, self.cvp))
+        return self._paIA
+
+    @property
+    def ipIA(self):
+        if self._ipIA is None:
+            self._ipIA = self._transform((self.coe, self.ce,
+                                          self.cop, self.cvp))
+        return self._ipIA
+
+    @property
+    def iaPA(self):
+        if self._iaPA is None:
+            self._iaPA = self._transform((self.coe, self.cve,
+                                          self.cp, self.cvp))
+        return self._iaPA
+
+    @property
+    def iaIP(self):
+        if self._iaIP is None:
+            self._iaIP = self._transform((self.coe, self.cve,
+                                          self.cop, self.cp))
+        return self._iaIP
+
+    def drop_ao_cache(self):
+        self._eri_ao = None
+        return self
+
+
+def _ee_deriv_contract(mol, co, cv, t2, atmlst, max_memory=None):
+    '''Contract ee derivative ERIs with MP2 amplitudes in AO shell blocks.'''
+    nao, nocc = co.shape
+    nvir = cv.shape[1]
+    t2 = numpy.asarray(t2)
+
+    # Same partial two-particle density transformation as conventional MP2
+    # gradients.  It avoids forming derivative MO integrals such as
+    # d(ov|ov), whose AO->MO intermediates are too large for these clusters.
+    part_dm2 = _ao2mo.nr_e2(t2.reshape(nocc**2, nvir**2),
+                            numpy.asarray(cv.T, order='F'),
+                            (0, nao, 0, nao), 's1', 's1')
+    part_dm2 = part_dm2.reshape(nocc, nocc, nao, nao)
+    part_dm2 = (part_dm2.transpose(0, 2, 3, 1) * 4 -
+                part_dm2.transpose(0, 3, 2, 1) * 2)
+
+    if max_memory is None:
+        max_memory = max(200, mol.max_memory - lib.current_memory()[0])
+    blksize = max(1, int(max_memory*.9e6/8/(nao**3*2.5)))
+
+    diagidx = numpy.arange(nao)
+    diagidx = diagidx*(diagidx+1)//2 + diagidx
+    offset = mol.offset_nr_by_atom()
+    de = numpy.zeros((len(atmlst), 3), dtype=numpy.result_type(t2, co))
+
+    for k, ia in enumerate(atmlst):
+        sh0, sh1, p0, p1 = offset[ia]
+        ip1 = p0
+        for b0, b1, nf in _shell_prange(mol, sh0, sh1, blksize):
+            ip0, ip1 = ip1, ip1 + nf
+            dm2buf = lib.einsum('pi,iqrj->pqrj',
+                                co[ip0:ip1], part_dm2)
+            dm2buf += lib.einsum('qi,iprj->pqrj',
+                                 co, part_dm2[:, ip0:ip1])
+            dm2buf = lib.einsum('pqrj,sj->pqrs', dm2buf, co)
+            dm2buf = dm2buf + dm2buf.transpose(0, 1, 3, 2)
+            dm2buf = lib.pack_tril(
+                dm2buf.reshape(-1, nao, nao)).reshape(nf, nao, -1)
+            dm2buf[:, :, diagidx] *= .5
+
+            shls_slice = (b0, b1, 0, mol.nbas, 0, mol.nbas, 0, mol.nbas)
+            eri1 = mol.intor('int2e_ip1', comp=3, aosym='s2kl',
+                             shls_slice=shls_slice).reshape(3, nf, nao, -1)
+            de[k] -= numpy.einsum('xijk,ijk->x', eri1, dm2buf) * 2
+    return de
+
+
+def _eri_ovov_rotation_deriv_blocked(eri, u):
+    nocc = eri.nocc
+    nvir = eri.nvir
+    uo = u[:, :nocc]
+    uv = u[:, nocc:]
+    ovov = eri.ovov
+    ooov = eri.ooov
+
+    d = numpy.einsum('pi,pajb->iajb', uo[:nocc], ovov)
+    d += numpy.einsum('pa,ipjb->iajb', uv[:nocc], ooov)
+    d += numpy.einsum('pj,iapb->iajb', uo[:nocc], ovov)
+    d += numpy.einsum('pb,jpia->iajb', uv[:nocc], ooov)
+
+    d += numpy.einsum('pa,ipjb->iajb', uv[nocc:], ovov)
+    d += numpy.einsum('pb,iajp->iajb', uv[nocc:], ovov)
+
+    for p0 in range(0, nvir, eri.vvov_chunk_size()):
+        p1 = min(p0 + eri.vvov_chunk_size(), nvir)
+        d += numpy.einsum('pi,pajb->iajb', uo[nocc+p0:nocc+p1],
+                          eri.vvov_chunk(p0, p1))
+
+    for p0 in range(0, nvir, eri.ovvv_chunk_size()):
+        p1 = min(p0 + eri.ovvv_chunk_size(), nvir)
+        d += numpy.einsum('pj,iapb->iajb', uo[nocc+p0:nocc+p1],
+                          eri.ovvv_chunk(p0, p1))
+
+    return d.transpose(0, 2, 1, 3)
+
+
+def _eri_ovov_rotation_contract(eri, u, t2_bar):
+    return _ee_rotation_terms_contract(_ee_rotation_terms(eri, t2_bar), u)
+
+
+def _ee_rotation_terms(eri, t2_bar):
+    nocc = eri.nocc
+    nvir = eri.nvir
+    ovov = eri.ovov
+    ooov = eri.ooov
+    w = 2.0 * t2_bar.transpose(0, 2, 1, 3)
+
+    uo_occ = numpy.einsum('iajb,pajb->pi', w, ovov)
+    uo_occ += numpy.einsum('iajb,iapb->pj', w, ovov)
+    uv_occ = numpy.einsum('iajb,ipjb->pa', w, ooov)
+    uv_occ += numpy.einsum('iajb,jpia->pb', w, ooov)
+    uv_vir = numpy.einsum('iajb,ipjb->pa', w, ovov)
+    uv_vir += numpy.einsum('iajb,iajp->pb', w, ovov)
+    uo_vir = numpy.zeros((nvir, nocc), dtype=numpy.result_type(w, ovov))
+
+    for p0 in range(0, nvir, eri.vvov_chunk_size()):
+        p1 = min(p0 + eri.vvov_chunk_size(), nvir)
+        uo_vir[p0:p1] += numpy.einsum('iajb,pajb->pi', w,
+                                      eri.vvov_chunk(p0, p1))
+
+    for p0 in range(0, nvir, eri.ovvv_chunk_size()):
+        p1 = min(p0 + eri.ovvv_chunk_size(), nvir)
+        uo_vir[p0:p1] += numpy.einsum('iajb,iapb->pj', w,
+                                      eri.ovvv_chunk(p0, p1))
+
+    return nocc, uo_occ, uo_vir, uv_occ, uv_vir
+
+
+def _ee_rotation_terms_contract(terms, u):
+    nocc, uo_occ, uo_vir, uv_occ, uv_vir = terms
+    uo = u[:, :nocc]
+    uv = u[:, nocc:]
+    return (numpy.einsum('pi,pi->', uo[:nocc], uo_occ) +
+            numpy.einsum('pi,pi->', uo[nocc:], uo_vir) +
+            numpy.einsum('pa,pa->', uv[:nocc], uv_occ) +
+            numpy.einsum('pa,pa->', uv[nocc:], uv_vir))
+
+
+def _ee_denom_deriv_weights(t2, t2_bar):
+    w_occ = (numpy.einsum('ijab,ijab->i', t2, t2_bar) +
+             numpy.einsum('ijab,ijab->j', t2, t2_bar))
+    w_vir = (numpy.einsum('ijab,ijab->a', t2, t2_bar) +
+             numpy.einsum('ijab,ijab->b', t2, t2_bar))
+    return w_occ, w_vir
+
+
+def _ee_denom_deriv_contract(eps1, nocc, weights):
+    w_occ, w_vir = weights
+    return (numpy.dot(eps1[:nocc], w_occ) -
+            numpy.dot(eps1[nocc:], w_vir))
+
+
+def _ep_denom_deriv_weights(t2):
+    w_occ_e = numpy.einsum('iaIA,iaIA->i', t2, t2)
+    w_vir_e = numpy.einsum('iaIA,iaIA->a', t2, t2)
+    w_occ_p = numpy.einsum('iaIA,iaIA->I', t2, t2)
+    w_vir_p = numpy.einsum('iaIA,iaIA->A', t2, t2)
+    return w_occ_e, w_vir_e, w_occ_p, w_vir_p
+
+
+def _ep_denom_deriv_contract(eps1_e, eps1_p, nocc_e, nocc_p, weights):
+    w_occ_e, w_vir_e, w_occ_p, w_vir_p = weights
+    return (numpy.dot(eps1_e[:nocc_e], w_occ_e) -
+            numpy.dot(eps1_e[nocc_e:], w_vir_e) +
+            numpy.dot(eps1_p[:nocc_p], w_occ_p) -
+            numpy.dot(eps1_p[nocc_p:], w_vir_p))
+
+
+def _ep_ovov_rotation_contract(eri, ue, up, t2):
+    return _ep_rotation_terms_contract(_ep_rotation_terms(eri, t2), ue, up)
+
+
+def _ep_rotation_terms(eri, t2):
+    w = 4.0 * t2
+    ue_occ = numpy.einsum('iaIA,paIA->pi', w, eri.paIA)
+    ue_vir = numpy.einsum('iaIA,ipIA->pa', w, eri.ipIA)
+    up_occ = numpy.einsum('iaIA,iaPA->PI', w, eri.iaPA)
+    up_vir = numpy.einsum('iaIA,iaIP->PA', w, eri.iaIP)
+    return eri.nocc_e, eri.nocc_p, ue_occ, ue_vir, up_occ, up_vir
+
+
+def _ep_rotation_terms_contract(terms, ue, up):
+    nocc_e, nocc_p, ue_occ, ue_vir, up_occ, up_vir = terms
+    return (numpy.einsum('pi,pi->', ue[:, :nocc_e], ue_occ) +
+            numpy.einsum('pa,pa->', ue[:, nocc_e:], ue_vir) +
+            numpy.einsum('PI,PI->', up[:, :nocc_p], up_occ) +
+            numpy.einsum('PA,PA->', up[:, nocc_p:], up_vir))
 
 
 def _s1mo_for_atom(comp, ia):
@@ -74,21 +370,23 @@ def _ep_intermediates(mf, t2_ep):
         dm1mo_p[t] = dm1mo_t
 
         charge_product = comp_e.charge * comp_p.charge
-        eri_mo = _ep_eri_mo(comp_e.mol, comp_p.mol, ce, cp) * charge_product
+        eri = _EPMOBlocks(comp_e.mol, comp_p.mol, ce, cp,
+                          occ_e, vir_e, occ_p, vir_p, charge_product)
 
-        eri_vvov = eri_mo[numpy.ix_(vir_e, vir_e, occ_p, vir_p)]
-        eri_ooov = eri_mo[numpy.ix_(occ_e, occ_e, occ_p, vir_p)]
+        eri_vvov = eri.paIA[nocc_e:]
+        eri_ooov = eri.ipIA[:, :nocc_e]
         lvo_e += 4.0 * numpy.einsum('iaIA,caIA->ci', t2, eri_vvov)
         lvo_e -= 4.0 * numpy.einsum('jcIA,jiIA->ci', t2, eri_ooov)
 
-        eri_ovvv = eri_mo[numpy.ix_(occ_e, vir_e, vir_p, vir_p)]
-        eri_ovoo = eri_mo[numpy.ix_(occ_e, vir_e, occ_p, occ_p)]
-        eri_ovII = numpy.diagonal(eri_ovoo, axis1=2, axis2=3)
+        eri_ovvv = eri.iaPA[:, :, nocc_p:]
+        eri_ovII = numpy.diagonal(eri.iaIP[:, :, :, :nocc_p],
+                                  axis1=2, axis2=3)
         lvo_t = 4.0 * numpy.einsum('iaIB,iaAB->AI', t2, eri_ovvv)
         lvo_t -= 4.0 * numpy.einsum('iaIA,iaI->AI', t2, eri_ovII)
         lvo_p[t] = lvo_t
 
-        ep_data.append((t, t2, eri_mo, charge_product))
+        eri.drop_ao_cache()
+        ep_data.append((t, t2, eri, charge_product))
 
     return dm1mo_e, dm1mo_p, lvo_e, lvo_p, ep_data
 
@@ -108,14 +406,14 @@ def _ee_intermediates(mp_e, t2):
     dm1mo[occ, occ] = -2.0 * numpy.einsum('kiab,kjab->ij', t2, t2_bar)
     dm1mo[vir, vir] = 2.0 * numpy.einsum('ijca,ijcb->ab', t2, t2_bar)
 
-    eri = mp_e.mol.intor('int2e', aosym='s4')
-    eri_mo = ao2mo.incore.full(eri, mo_coeff, compact=False).reshape(
-        nmo, nmo, nmo, nmo)
-    eri_vvov = eri_mo[vir, vir, occ, vir]
-    eri_ooov = eri_mo[occ, occ, occ, vir]
-    lvo = 4.0 * numpy.einsum('ijab,cajb->ci', t2_bar, eri_vvov)
-    lvo -= 4.0 * numpy.einsum('kjcb,kmjb->cm', t2_bar, eri_ooov)
-    return dm1mo, lvo, t2_bar, eri_mo
+    eri = _EEMOBlocks(mp_e.mol, mo_coeff, nocc)
+    lvo = numpy.zeros((nvir, nocc), dtype=numpy.result_type(t2, mo_coeff))
+    for c0 in range(0, nvir, eri.vvov_chunk_size()):
+        c1 = min(c0 + eri.vvov_chunk_size(), nvir)
+        lvo[c0:c1] += 4.0 * numpy.einsum(
+            'ijab,cajb->ci', t2_bar, eri.vvov_chunk(c0, c1))
+    lvo -= 4.0 * numpy.einsum('kjcb,kmjb->cm', t2_bar, eri.ooov)
+    return dm1mo, lvo, t2_bar, eri
 
 
 def _density_response_rhs(mf, dm1mo):
@@ -210,6 +508,64 @@ def _fixed_occ_response(mf, h1ao, ia, x):
     return q_mo, s1_mo, b_vo, d_constraint
 
 
+def _fixed_occ_response_all(mf, h1ao, atmlst):
+    nset = len(atmlst) * 3
+    q_mo = [[{} for x in range(3)] for ia in atmlst]
+    s1_mo = [[{} for x in range(3)] for ia in atmlst]
+    b_vo = [[{} for x in range(3)] for ia in atmlst]
+    d_constraint = [[{} for x in range(3)] for ia in atmlst]
+    dm_fixed = {}
+    u_fixed = {}
+
+    for t, comp in mf.components.items():
+        nocc = numpy.count_nonzero(comp.mo_occ > 0)
+        nmo = comp.mo_coeff.shape[1]
+        u_all = numpy.zeros((nset, nmo, nocc),
+                            dtype=numpy.result_type(comp.mo_coeff))
+        for k, ia in enumerate(atmlst):
+            s1_atom = _s1mo_for_atom(comp, ia)
+            for x in range(3):
+                iset = k * 3 + x
+                s1 = s1_atom[x]
+                s1_mo[k][x][t] = s1
+                u_all[iset, :nocc, :] = -0.5 * s1[:nocc, :nocc]
+
+        fac = 1 if t.startswith('n') else 2
+        mocc = comp.mo_coeff[:, :nocc]
+        dm = numpy.einsum('up,xpi,vi->xuv',
+                          comp.mo_coeff, u_all * fac, mocc)
+        dm_fixed[t] = dm + dm.transpose(0, 2, 1)
+        u_fixed[t] = u_all
+
+    v_fixed = mf.gen_response(mf.mo_coeff, mf.mo_occ, hermi=1)(dm_fixed)
+
+    for t, comp in mf.components.items():
+        nocc = numpy.count_nonzero(comp.mo_occ > 0)
+        v = v_fixed.get(t, 0)
+        if isinstance(v, numpy.ndarray) and v.ndim == 2:
+            v = v.reshape(1, *v.shape)
+        if t.startswith('n'):
+            r_mo = numpy.asarray([reduce(numpy.dot, (comp.mo_coeff.T, r,
+                                                     comp.mo_coeff))
+                                  for r in comp.int1e_r])
+        for k, ia in enumerate(atmlst):
+            for x in range(3):
+                iset = k * 3 + x
+                v1 = v[iset] if isinstance(v, numpy.ndarray) else 0
+                h1mo = reduce(numpy.dot, (comp.mo_coeff.T,
+                                          h1ao[t][ia][x] + v1,
+                                          comp.mo_coeff))
+                q = h1mo - s1_mo[k][x][t] * comp.mo_energy
+                q_mo[k][x][t] = q
+                b_vo[k][x][t] = q[nocc:, :nocc]
+
+                if t.startswith('n'):
+                    d_constraint[k][x][t] = numpy.einsum(
+                        'pi,rpi->r', u_fixed[t][iset], r_mo[:, :, :nocc])
+
+    return q_mo, s1_mo, b_vo, d_constraint
+
+
 def _ee_nonresponse_grad(mp_e, t2, t2_bar, eri_mo, q_mo, s1_mo,
                          atmlst):
     mol = mp_e.mol
@@ -218,29 +574,24 @@ def _ee_nonresponse_grad(mp_e, t2, t2_bar, eri_mo, q_mo, s1_mo,
     nmo = mo_coeff.shape[1]
     co = mo_coeff[:, :nocc]
     cv = mo_coeff[:, nocc:]
-    eri1 = mol.intor('int2e_ip1', comp=3, aosym='s1')
-    eri1 = eri1.reshape(3, mol.nao_nr(), mol.nao_nr(),
-                        mol.nao_nr(), mol.nao_nr())
-    offset = mol.offset_nr_by_atom()
-    t2_weight = t2 * t2_bar
+    denom_weights = _ee_denom_deriv_weights(t2, t2_bar)
+    rotation_terms = _ee_rotation_terms(eri_mo, t2_bar)
     de = numpy.zeros((len(atmlst), 3), dtype=numpy.result_type(t2, mo_coeff))
+    de += _ee_deriv_contract(mol, co, cv, t2, atmlst,
+                             max(200, mp_e.max_memory-lib.current_memory()[0]))
 
     for k, ia in enumerate(atmlst):
-        p0, p1 = offset[ia][2:]
         for x in range(3):
             q = q_mo[k][x]['e']
             s1 = s1_mo[k][x]['e']
             u = _fill_canonical_mo_response(numpy.zeros((nmo, nocc)),
                                             q, s1, mp_e._scf.mo_energy, nocc)
-            dg = _ao_eri_deriv_ovov(eri1[x], co, cv, p0, p1)
-            dg += _eri_ovov_rotation_deriv(eri_mo, u, nocc)
+            e_rot = _ee_rotation_terms_contract(rotation_terms, u)
 
             eps1 = numpy.diag(q)
-            ddenom = lib.direct_sum('i+j-a-b->ijab',
-                                    eps1[:nocc], eps1[:nocc],
-                                    eps1[nocc:], eps1[nocc:])
-            de[k, x] = (2.0 * numpy.einsum('ijab,ijab->', t2_bar, dg)
-                        - numpy.einsum('ijab,ijab->', t2_weight, ddenom))
+            de[k, x] += (e_rot -
+                         _ee_denom_deriv_contract(eps1, nocc,
+                                                  denom_weights))
     return de.real
 
 
@@ -254,33 +605,26 @@ def _ep_nonresponse_grad(mf, ep_data, q_mo, s1_mo, atmlst):
     occ_e = comp_e.mo_occ > 0
     vir_e = comp_e.mo_occ == 0
     nocc_e = numpy.count_nonzero(occ_e)
-    nao_e = mol_e.nao_nr()
     de = numpy.zeros((len(atmlst), 3), dtype=numpy.result_type(ce))
 
-    for t, t2, eri_mo, charge_product in ep_data:
+    for t, t2, eri, charge_product in ep_data:
         comp_p = mf.components[t]
         mol_p = comp_p.mol
         cp = comp_p.mo_coeff
         occ_p = comp_p.mo_occ > 0
         vir_p = comp_p.mo_occ == 0
         nocc_p = numpy.count_nonzero(occ_p)
+        denom_weights = _ep_denom_deriv_weights(t2)
+        rotation_terms = _ep_rotation_terms(eri, t2)
 
-        mol_tot = mol_e + mol_p
-        nao_tot = mol_tot.nao_nr()
-        coe = _embed_coeff(ce[:, occ_e], nao_tot, 0)
-        cve = _embed_coeff(ce[:, vir_e], nao_tot, 0)
-        cop = _embed_coeff(cp[:, occ_p], nao_tot, nao_e)
-        cvp = _embed_coeff(cp[:, vir_p], nao_tot, nao_e)
-        eri1 = mol_tot.intor('int2e_ip1', comp=3, aosym='s1')
-        eri1 = eri1.reshape(3, nao_tot, nao_tot, nao_tot, nao_tot)
-        offset_e = mol_e.offset_nr_by_atom()
-        offset_p = mol_p.offset_nr_by_atom()
+        coe = ce[:, occ_e]
+        cve = ce[:, vir_e]
+        cop = cp[:, occ_p]
+        cvp = cp[:, vir_p]
 
         for k, ia in enumerate(atmlst):
-            p0e, p1e = offset_e[ia][2:]
-            p0p, p1p = offset_p[ia][2:]
-            p0p += nao_e
-            p1p += nao_e
+            dg_bare = _ao_eri_deriv_ep_ovov_cross(
+                mol_e, mol_p, coe, cve, cop, cvp, ia, charge_product)
             for x in range(3):
                 qe = q_mo[k][x]['e']
                 qp = q_mo[k][x][t]
@@ -291,21 +635,13 @@ def _ep_nonresponse_grad(mf, ep_data, q_mo, s1_mo, atmlst):
                     numpy.zeros((cp.shape[1], nocc_p)),
                     qp, s1_mo[k][x][t], comp_p.mo_energy, nocc_p)
 
-                dg = _ao_eri_deriv_ep_ovov(eri1[x], coe, cve, cop, cvp,
-                                           p0e, p1e, p0p, p1p,
-                                           charge_product)
-                dg += _ep_ovov_rotation_deriv(eri_mo, ue, up,
-                                              nocc_e, nocc_p)
-
                 eps1_e = numpy.diag(qe)
                 eps1_p = numpy.diag(qp)
-                ddenom = (eps1_e[:nocc_e, None, None, None]
-                          + eps1_p[None, None, :nocc_p, None]
-                          - eps1_e[None, nocc_e:, None, None]
-                          - eps1_p[None, None, None, nocc_p:])
                 de[k, x] += (
-                    4.0 * numpy.einsum('iaIA,iaIA->', t2, dg)
-                    - 2.0 * numpy.einsum('iaIA,iaIA->', t2 * t2, ddenom))
+                    4.0 * numpy.einsum('iaIA,iaIA->', t2, dg_bare[x])
+                    + _ep_rotation_terms_contract(rotation_terms, ue, up)
+                    - 2.0 * _ep_denom_deriv_contract(
+                        eps1_e, eps1_p, nocc_e, nocc_p, denom_weights))
 
     return de.real
 
@@ -355,39 +691,51 @@ def _solve_z_cneo_adjoint(mf, lvo_e, lvo_p, l_f=None):
     fx_full = hessian.gen_vind(mf, mo_coeff, mo_occ)
 
     def unpack(vec):
+        vec = numpy.asarray(vec)
+        is_vector = vec.ndim == 1
+        if is_vector:
+            vec = vec.reshape(1, total)
+        nset = vec.shape[0]
         mo1_full = {}
         for t in keys:
             data = info[t]
-            block = vec[data['offset']:data['offset']+data['size']]
-            block = block.reshape(data['nvir'], data['nocc'])
-            full = numpy.zeros((1, data['nmo'], data['nocc']))
-            full[0, data['nocc']:, :] = block
+            block = vec[:, data['offset']:data['offset']+data['size']]
+            block = block.reshape(nset, data['nvir'], data['nocc'])
+            full = numpy.zeros((nset, data['nmo'], data['nocc']))
+            full[:, data['nocc']:, :] = block
             mo1_full[t] = full
         f1 = {}
         for t, p0 in f_offset.items():
-            f1[t] = vec[p0:p0+3].reshape(1, 3)
-        return mo1_full, f1
+            f1[t] = vec[:, p0:p0+3].reshape(nset, 3)
+        return mo1_full, f1, is_vector
 
     def apply_a(vec):
-        mo1_full, f1 = unpack(vec)
+        mo1_full, f1, is_vector = unpack(vec)
+        nset = next(iter(mo1_full.values())).shape[0]
         v_full, r = fx_full(mo1_full, f1=f1)
-        out = numpy.zeros(total)
+        out = numpy.zeros((nset, total))
         for t in keys:
             data = info[t]
-            v = v_full[t].reshape(1, data['nmo'], data['nocc'])
-            vvo = v[0, data['nocc']:, :]
-            uvo = mo1_full[t][0, data['nocc']:, :]
+            v = v_full[t].reshape(nset, data['nmo'], data['nocc'])
+            vvo = v[:, data['nocc']:, :]
+            uvo = mo1_full[t][:, data['nocc']:, :]
             avo = data['denom'] * uvo + vvo
             p0 = data['offset']
-            out[p0:p0+data['size']] = avo.ravel()
+            out[:, p0:p0+data['size']] = avo.reshape(nset, data['size'])
         if r is not None:
             for t, rt in r.items():
                 if t in f_offset:
-                    out[f_offset[t]:f_offset[t]+3] = rt.reshape(3)
-        return out
+                    out[:, f_offset[t]:f_offset[t]+3] = rt.reshape(nset, 3)
+        return out.reshape(total) if is_vector else out
 
-    eye = numpy.eye(total)
-    amat = numpy.asarray([apply_a(eye[:, i]) for i in range(total)]).T
+    max_memory = max(200, mf.max_memory-lib.current_memory()[0])
+    blksize = min(total, 64, _block_size(max_memory * .25, total))
+    amat = numpy.empty((total, total))
+    for p0 in range(0, total, blksize):
+        p1 = min(p0 + blksize, total)
+        trial = numpy.zeros((p1-p0, total))
+        trial[:, p0:p1] = numpy.eye(p1-p0)
+        amat[:, p0:p1] = apply_a(trial).T
     zvec = numpy.linalg.solve(amat.T, rhs)
 
     z_mo = {}
@@ -434,25 +782,8 @@ def _zvector_mo_gradient(mp_grad, mf, mp_e, t2, atmlst, log, cput0):
     hessobj.verbose = mp_grad.verbose
     h1ao = hessobj.make_h1(mf.mo_coeff, mf.mo_occ, None, atmlst, log)
 
-    q_mo = []
-    s1_mo = []
-    b_vo = []
-    d_constraint = []
-    for ia in atmlst:
-        q_atom = []
-        s_atom = []
-        b_atom = []
-        d_atom = []
-        for x in range(3):
-            qx, sx, bx, dx = _fixed_occ_response(mf, h1ao, ia, x)
-            q_atom.append(qx)
-            s_atom.append(sx)
-            b_atom.append(bx)
-            d_atom.append(dx)
-        q_mo.append(q_atom)
-        s1_mo.append(s_atom)
-        b_vo.append(b_atom)
-        d_constraint.append(d_atom)
+    q_mo, s1_mo, b_vo, d_constraint = \
+        _fixed_occ_response_all(mf, h1ao, atmlst)
 
     de_corr = _ee_nonresponse_grad(mp_e, t2, t2_bar, eri_ee_mo,
                                    q_mo, s1_mo, atmlst)

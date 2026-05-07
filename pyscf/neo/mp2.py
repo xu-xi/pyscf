@@ -23,9 +23,27 @@ import numpy
 from pyscf import gto
 from pyscf import lib
 from pyscf.lib import logger
-from pyscf import ao2mo
 from pyscf import mp
 from pyscf import scf
+
+
+def _ep_ao_eri(mol_e, mol_n, intor='int2e', comp=None, shls_slice=None):
+    """AO integrals over electron-electron and proton-proton blocks."""
+    mol_tot = mol_e + mol_n
+    nbas_e = mol_e.nbas
+    nbas_tot = mol_tot.nbas
+    if shls_slice is None:
+        shls_slice = (0, nbas_e, 0, nbas_e,
+                      nbas_e, nbas_tot, nbas_e, nbas_tot)
+    return mol_tot.intor(intor, aosym='s1', comp=comp, shls_slice=shls_slice)
+
+
+def _ep_ovov_from_ao(eri, coe, cve, con, cvn):
+    """Transform an AO (ee|nn) block to the e-o/e-v/n-o/n-v MO block."""
+    tmp = numpy.einsum('...pqrs,pi->...iqrs', eri, coe, optimize=True)
+    tmp = numpy.einsum('...iqrs,qa->...iars', tmp, cve, optimize=True)
+    tmp = numpy.einsum('...iars,rj->...iajs', tmp, con, optimize=True)
+    return numpy.einsum('...iajs,sb->...iajb', tmp, cvn, optimize=True)
 
 
 def as_scanner(mp2_obj):
@@ -194,31 +212,9 @@ class MP2(lib.StreamObject):
         idx_vir_e = numpy.where(viridx_e)[0]
         idx_occ_n = numpy.where(occidx_n)[0]
         idx_vir_n = numpy.where(viridx_n)[0]
-
-        nocc_e = idx_occ_e.size
-        nvir_e = idx_vir_e.size
-        nocc_n = idx_occ_n.size
-        nvir_n = idx_vir_n.size
-
-        nao_e = mol_e.nao_nr()
-        nao_n = mol_n.nao_nr()
-        nao_tot = nao_e + nao_n
-
-        co_e = numpy.zeros((nao_tot, nocc_e))
-        cv_e = numpy.zeros((nao_tot, nvir_e))
-        co_n = numpy.zeros((nao_tot, nocc_n))
-        cv_n = numpy.zeros((nao_tot, nvir_n))
-
-        co_e[:nao_e, :] = ce[:, idx_occ_e]
-        cv_e[:nao_e, :] = ce[:, idx_vir_e]
-        co_n[nao_e:, :] = cn[:, idx_occ_n]
-        cv_n[nao_e:, :] = cn[:, idx_vir_n]
-
-        mol_tot = mol_e + mol_n
-        eri = mol_tot.intor('int2e', aosym='s4')
-        eri_ovov = ao2mo.incore.general(eri, (co_e, cv_e, co_n, cv_n),
-                                        compact=False)
-        return eri_ovov.reshape(nocc_e, nvir_e, nocc_n, nvir_n)
+        eri = _ep_ao_eri(mol_e, mol_n)
+        return _ep_ovov_from_ao(eri, ce[:, idx_occ_e], ce[:, idx_vir_e],
+                                cn[:, idx_occ_n], cn[:, idx_vir_n])
 
     def _compute_ep_corr(self, with_t2=True):
         mf = self.base
